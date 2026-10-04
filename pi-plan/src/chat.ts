@@ -1,0 +1,147 @@
+import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
+import {
+    type Component,
+    Markdown,
+    stripTerminalSequences,
+    visibleWidth,
+    wrapTextWithAnsi,
+} from "@earendil-works/pi-tui";
+
+interface ChatResult {
+    content: Array<{ type: string; text?: string }>;
+    details?: unknown;
+}
+
+type RecordValue = Record<string, unknown>;
+type Status = "waiting" | "answered" | "cancelled" | "ready" | "error";
+
+function record(value: unknown): RecordValue {
+    return typeof value === "object" && value !== null && !Array.isArray(value)
+        ? value as RecordValue
+        : {};
+}
+
+function clean(value: unknown): string {
+    return stripTerminalSequences(typeof value === "string" ? value : "")
+        .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, " ")
+        .trim();
+}
+
+function prose(value: unknown): string {
+    return clean(value).replace(/[\\`*_{}\[\]()<>#+.!|~$-]/gu, "\\$&");
+}
+
+function contentText(result: ChatResult): string {
+    return result.content.filter((block) => block.type === "text")
+        .map((block) => block.text ?? "").join("\n");
+}
+
+/** Transcript presentation only: payloads, IDs and model-facing JSON remain unchanged. */
+export class PlanChatCard implements Component {
+    private body: Markdown;
+
+    constructor(
+        private title: string,
+        body: string,
+        private theme: Theme,
+        private status: Status,
+    ) {
+        this.body = new Markdown(clean(body), 0, 0, getMarkdownTheme());
+    }
+
+    invalidate() {
+        this.body.invalidate();
+    }
+
+    render(width: number): string[] {
+        if (!Number.isFinite(width) || width < 1) return [];
+        const columns = Math.floor(width);
+        const color = this.status === "error"
+            ? "error"
+            : this.status === "cancelled"
+            ? "warning"
+            : this.status === "waiting"
+            ? "muted"
+            : "success";
+        const heading = this.theme.fg("accent", this.theme.bold(this.title))
+            + " · " + this.theme.fg(color, this.status);
+        return [heading, "", ...this.body.render(columns)].flatMap((line) =>
+            wrapTextWithAnsi(line, columns).map((row) =>
+                // A two-cell grapheme cannot fit a one-column terminal. Never slice it or add dots.
+                visibleWidth(row) > columns ? "?" : row
+            )
+        );
+    }
+}
+
+export function renderPlanQuestionCall(args: unknown, theme: Theme) {
+    const questions = record(args).questions;
+    const body = Array.isArray(questions)
+        ? questions.map((value, index) => {
+            const question = record(value);
+            const options = Array.isArray(question.options) ? question.options : [];
+            return [
+                `### ${prose(question.header) || `Question ${index + 1}`}`,
+                prose(question.question),
+                options.map((value, optionIndex) => {
+                    const option = record(value);
+                    const description = prose(option.description);
+                    return `${optionIndex + 1}. **${prose(option.label)}**`
+                        + (description ? ` — ${description}` : "");
+                }).join("\n"),
+            ].filter(Boolean).join("\n\n");
+        }).join("\n\n")
+        : "_Preparing questions._";
+    return new PlanChatCard("Plan · Questions", body, theme, "waiting");
+}
+
+export function renderPlanQuestionResult(
+    result: ChatResult,
+    options: { isPartial: boolean },
+    theme: Theme,
+) {
+    let payload: RecordValue = {};
+    const text = contentText(result);
+    try {
+        payload = record(JSON.parse(text));
+    } catch {
+        // Plain tool errors are still readable; only structured question results are decoded.
+    }
+    const details = { ...payload, ...record(result.details) };
+    if (details.cancelled === true) {
+        const message = prose(details.message) || prose(details.reason) || "Question cancelled.";
+        return new PlanChatCard("Plan · Questions", message, theme, "cancelled");
+    }
+    if (Array.isArray(details.answers)) {
+        const body = details.answers.map((value, index) => {
+            const answer = record(value);
+            const number = Number.isInteger(answer.optionIndex) ? `${answer.optionIndex}. ` : "";
+            return [
+                `### ${prose(answer.header) || `Question ${index + 1}`}`,
+                prose(answer.question),
+                `**${answer.wasCustom ? "Custom answer" : "Answer"}:** ${number}${
+                    prose(answer.answer)
+                }`,
+                ...(typeof answer.note === "string" && answer.note
+                    ? [`**Note:**\n\n${prose(answer.note)}`]
+                    : []),
+            ].filter(Boolean).join("\n\n");
+        }).join("\n\n");
+        return new PlanChatCard("Plan · Answers", body, theme, "answered");
+    }
+    const body = options.isPartial
+        ? "_Waiting for answers._"
+        : Object.keys(payload).length
+        ? "_No answers available._"
+        : prose(text);
+    return new PlanChatCard(
+        "Plan · Questions",
+        body,
+        theme,
+        options.isPartial ? "waiting" : "error",
+    );
+}
+
+export function renderPlanCompletionCall(_args: unknown, theme: Theme) {
+    return new PlanChatCard("Plan", "_Preparing the implementation plan._", theme, "waiting");
+}

@@ -1,0 +1,55 @@
+{
+    "name": "pi-local-extensions",
+    "version": "0.1.0",
+    "private": true,
+    "description": "Portable Pi extension bundle: Helix editor, OpenAI subagents, web tools and Plan Mode",
+    "keywords": [
+        "pi-package"
+    ],
+    "license": "MIT",
+    "type": "module",
+    "workspaces": ["pi-hem", "pi-openai-subagents", "pi-openai-web", "pi-plan"],
+    "scripts": {
+        "setup:dev": "npm ci --include=dev --legacy-peer-deps",
+        "format": "dprint fmt && npm run format --workspaces",
+        "format:check": "dprint check && npm run format:check --workspaces",
+        "typecheck": "npm run typecheck --workspaces",
+        "test": "node --test tests/*.test.mjs",
+        "smoke": "node scripts/smoke.mjs",
+        "check": "dprint check && npm test && npm run check --workspaces"
+    },
+    "dependencies": {
+        "@narumitw/pi-tui-kit": "0.59.0",
+        "cheerio": "1.1.2",
+        "ipaddr.js": "2.2.0"
+    },
+    "devDependencies": {
+        "@earendil-works/pi-agent-core": "1.0.0",
+        "@earendil-works/pi-ai": "1.0.0",
+        "@earendil-works/pi-coding-agent": "1.0.0",
+        "@earendil-works/pi-tui": "1.0.0",
+        "@types/node": "^22.19.0",
+        "dprint": "^0.58.0",
+        "jiti": "^2.6.0",
+        "typebox": "1.3.27",
+        "typescript": "^5.9.3"
+    },
+    "peerDependencies": {
+        "@earendil-works/pi-agent-core": "*",
+        "@earendil-works/pi-ai": "*",
+        "@earendil-works/pi-coding-agent": "*",
+        "@earendil-works/pi-tui": "*",
+        "typebox": "*"
+    },
+    "engines": {
+        "node": ">=22.19.0"
+    },
+    "pi": {
+        "extensions": [
+            "./pi-hem/index.ts",
+            "./pi-openai-subagents/index.ts",
+            "./pi-openai-web/index.ts",
+            "./pi-plan/index.ts"
+        ]
+    }
+}
