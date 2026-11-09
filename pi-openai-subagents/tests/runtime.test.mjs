@@ -9,6 +9,7 @@ import {
     model,
     pause,
     policies,
+    promptInputs,
     report,
     runtime,
     scheduling,
@@ -52,6 +53,74 @@ test("real Agent single run, isolated task context, usage and model assignments"
     assert.equal(transcript.messages.filter((m) => m.role === "user").length, 1);
     assert.match(JSON.stringify(transcript), /Explicit facts/);
     assert.doesNotMatch(JSON.stringify(transcript), /abandoned-parent-secret/);
+});
+test("child input projection drops telemetry/details, deduplicates evidence and caps prompt bytes", () => {
+    const evidence = {
+        id: "evidence-source",
+        owner: "research-run",
+        tool: "openai_search",
+        retrievedAt: "2026-01-01T00:00:00.000Z",
+        text: "Source answer with useful citations. ".repeat(1000),
+        details: { secretLargePayload: "never send this detail payload".repeat(1000) },
+        isError: false,
+        inspection: "search",
+    };
+    const inputRun = {
+        id: "research-run",
+        agent: "researcher",
+        profile: "researcher",
+        model: "openai/test-model",
+        thinking: "high",
+        status: "complete",
+        task: "Research",
+        inputs: [],
+        writePaths: [],
+        report: report({ summary: "Keep report content" }),
+        evidence: [evidence],
+        durationMs: 1234,
+        usage: state.emptyUsage(),
+        turns: 3,
+        lastActivity: "last streamed token",
+        truncated: false,
+        reportBytes: 100,
+        changed: false,
+        uncertainShell: false,
+        revision: 1,
+        reviewRevision: 1,
+        toolActivity: [
+            { tool: "read", capability: "read", isError: false },
+            { tool: "read", capability: "read", isError: false },
+        ],
+    };
+    const formatted = promptInputs.formatPromptInputs([inputRun, evidence]);
+    const payload = JSON.parse(formatted.text);
+    const projectedRun = payload.records[0];
+    assert.deepEqual(payload.inputIds, ["research-run", "evidence-source"]);
+    assert.equal(projectedRun.report.summary, "Keep report content");
+    assert.equal(projectedRun.usage, undefined);
+    assert.equal(projectedRun.durationMs, undefined);
+    assert.deepEqual(projectedRun.toolActivity, [{
+        tool: "read",
+        capability: "read",
+        succeeded: 2,
+        failed: 0,
+    }]);
+    assert.equal(projectedRun.evidence[0].structuredDetailsOmitted, true);
+    assert.equal(projectedRun.evidence[0].textTruncated, true);
+    assert.equal(payload.records[1].kind, "evidence-reference");
+    assert.doesNotMatch(formatted.text, /never send this detail payload/);
+    assert.equal(evidence.details.secretLargePayload.length > 0, true);
+
+    const hugeReport = {
+        ...inputRun,
+        id: "huge-report",
+        evidence: [],
+        report: report({ summary: "界".repeat(50_000) }),
+    };
+    const capped = promptInputs.formatPromptInputs([hugeReport]);
+    assert.equal(capped.truncated, true);
+    assert.ok(Buffer.byteLength(capped.text) <= 64 * 1024);
+    assert.match(capped.text, /Truncated/);
 });
 test("parent hooks retain final veto; workers inherit shell, scouts do not", async (t) => {
     let executed = 0;
@@ -147,8 +216,8 @@ test("parallel child identities survive wrapper nesting; reviewers get shell but
     });
     assert.deepEqual(identities, ["worker"]);
     await h.command("tools reviewer");
-    assert.match(h.messages.at(-1).content, /bash: execute — allowed/);
-    assert.match(h.messages.at(-1).content, /edit: write — reviewer.*cannot/);
+    assert.match(h.messages.at(-1).content, /bash: execute - allowed/);
+    assert.match(h.messages.at(-1).content, /edit: write - reviewer.*cannot/);
 });
 test("unknown tools require approval, parent veto still wins, and no tool activation occurs", async (t) => {
     let executed = 0;
@@ -306,13 +375,103 @@ test("input IDs are branch-local and validated before any agent starts", async (
     assert.equal(invalid.isError, true);
     assert.equal(starts, 0);
 });
+test("child tool declarations default to active direct tools and allow explicit callable opt-ins", async (t) => {
+    const h = await harness(t, {
+        tools: [
+            tool("read"),
+            tool("edit"),
+            tool("deferred_read", async () => ({ content: [], details: {} }), {
+                exposure: "deferred",
+                annotations: { readOnlyHint: true },
+            }),
+            tool("codemode_read", async () => ({ content: [], details: {} }), {
+                exposure: "codemode",
+                annotations: { readOnlyHint: true },
+            }),
+        ],
+    });
+    const ledger = new state.Ledger();
+    const host = {
+        pi: h.pi,
+        config: () => h.config,
+        settings: () => ({}),
+        ledger: () => ledger,
+        authorize: async () => undefined,
+    };
+    const loadouts = [];
+    const runner = new runtime.Runtime(host, (options) => {
+        loadouts.push(options.initialState.tools.map((t) => t.name));
+        return {
+            state: {},
+            subscribe: () => () => {},
+            abort() {},
+            async waitForIdle() {},
+            async prompt() {
+                await options.initialState.tools.find((t) => t.name === "agent_report").execute(
+                    "report",
+                    report(),
+                );
+            },
+        };
+    });
+
+    await runner.run([{ agent: "scout", task: "Use default tools" }], h.ctx);
+    assert.deepEqual(loadouts[0], ["read", "agent_report"]);
+
+    await runner.run([{
+        agent: "scout",
+        task: "Use deferred tools",
+        tools: ["deferred_read", "codemode_read"],
+    }], h.ctx);
+    assert.deepEqual(loadouts[1], ["deferred_read", "codemode_read", "agent_report"]);
+
+    await assert.rejects(
+        runner.run([{ agent: "scout", task: "Forbidden", tools: ["edit"] }], h.ctx),
+        /cannot use write tool edit/,
+    );
+    assert.equal(loadouts.length, 2);
+});
+test("read-only child tools may run in parallel, while write-capable children stay sequential", async (t) => {
+    let running = 0;
+    let peak = 0;
+    const operation = async () => {
+        peak = Math.max(peak, ++running);
+        await pause(15);
+        running--;
+        return { content: [], details: {} };
+    };
+    const h = await harness(t, {
+        tools: [tool("read", operation), tool("grep", operation), tool("edit")],
+        stream: (m, c) =>
+            stream(
+                m,
+                turns(c) === 0
+                    ? [call("read", {}), call("grep", {})]
+                    : [call("agent_report", report())],
+            ),
+    });
+
+    await h.execute("subagents_run", { tasks: [{ agent: "scout", task: "Inspect" }] });
+    assert.equal(peak, 2);
+
+    peak = 0;
+    await h.execute("subagents_run", { tasks: [{ agent: "worker", task: "Implement" }] });
+    assert.equal(peak, 1);
+});
 test("bounded concurrency, stable input order and partial failures", async (t) => {
     const e = await environment(t);
     const ledger = new state.Ledger();
     let running = 0;
     let peak = 0;
+    let toolCatalogReads = 0;
     const host = {
-        pi: { getAllTools: () => [], getActiveTools: () => [] },
+        pi: {
+            getAllTools: () => {
+                toolCatalogReads++;
+                return [];
+            },
+            getActiveTools: () => [],
+        },
         config: () => e.config,
         settings: () => ({}),
         ledger: () => ledger,
@@ -354,6 +513,7 @@ test("bounded concurrency, stable input order and partial failures", async (t) =
         task: "fast",
     }, { agent: "scout", task: "fail" }], e.ctx);
     assert.equal(peak, 2);
+    assert.equal(toolCatalogReads, 1);
     assert.deepEqual(result.results.map((r) => r.task), ["slow", "fast", "fail"]);
     assert.deepEqual(result.results.map((r) => r.status), ["complete", "complete", "failed"]);
     assert.equal(result.partial, true);
@@ -420,6 +580,51 @@ test("terminal elapsed freezes before slow cleanup and heartbeat subscriptions a
     const count = updates.length;
     heartbeat();
     assert.equal(updates.length, count); // Stale callbacks cannot republish settled batches.
+});
+
+test("rapid streamed message updates coalesce while terminal snapshots remain immediate", async (t) => {
+    const e = await environment(t);
+    const ledger = new state.Ledger();
+    const host = {
+        pi: { getAllTools: () => [], getActiveTools: () => [] },
+        config: () => e.config,
+        settings: () => ({}),
+        ledger: () => ledger,
+        authorize: async () => undefined,
+    };
+    let listener;
+    const runner = new runtime.Runtime(host, (options) => ({
+        state: {},
+        subscribe(callback) {
+            listener = callback;
+            return () => {};
+        },
+        abort() {},
+        async waitForIdle() {},
+        async prompt() {
+            for (let i = 0; i < 20; i++) {
+                listener({
+                    type: "message_update",
+                    assistantMessageEvent: { type: "text_delta", delta: `chunk ${i}` },
+                });
+            }
+            await options.initialState.tools.find((t) => t.name === "agent_report").execute(
+                "report",
+                report(),
+            );
+        },
+    }));
+    e.ctx.tools = [];
+    const updates = [];
+    const result = await runner.run(
+        [{ agent: "scout", task: "Stream" }],
+        e.ctx,
+        undefined,
+        (batch) => updates.push(batch),
+    );
+    assert.equal(result.results[0].status, "complete");
+    assert.equal(updates.length, 3); // queued, running, and immediate terminal snapshot
+    assert.equal(updates.at(-1).results[0].status, "complete");
 });
 
 test("throwing runtime update consumer is disabled without aborting work, and unsubscribe cleanup is final", async (t) => {

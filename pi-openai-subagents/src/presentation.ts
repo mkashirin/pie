@@ -13,7 +13,7 @@ export const MAX_VISIBLE_RUNS = 8;
 
 const clean = (value: unknown) => compactText(typeof value === "string" ? value : "");
 
-const clipped = (line: string, width: number) => truncateToWidth(line, Math.max(0, width), "…");
+const clipped = (line: string, width: number) => truncateToWidth(line, Math.max(0, width), "...");
 
 /** Shared status colors; the editor fleet returns before any transcript details. No margins. */
 export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false): string[] {
@@ -27,11 +27,11 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
         : "muted";
     const name = theme.fg("accent", clean(run.agent));
     const status = theme.fg(token, clean(run.status));
-    if (fleet) return [`${name} · ${status} · ${seconds}s`];
+    if (fleet) return [`${name} | ${status} | ${seconds}s`];
     const metadata = [
-        `${name} · ${status}`,
-        `Role: ${clean(run.profile)} · Model: ${clean(run.model)}`,
-        `Elapsed: ${seconds}s · ${run.turns ?? 0} turns`,
+        `${name} | ${status}`,
+        `Role: ${clean(run.profile)} | Model: ${clean(run.model)}`,
+        `Elapsed: ${seconds}s | ${run.turns ?? 0} turns`,
     ];
     const preview = run.activity;
     const stageToken = preview?.stage === "failed"
@@ -41,11 +41,16 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
         : preview?.stage === "succeeded"
         ? "success"
         : "accent";
+    const stageIcon = preview?.stage === "succeeded"
+        ? "x "
+        : preview?.stage === "failed"
+        ? "x "
+        : "";
     const activity = preview
         ? [
-            `${theme.fg(stageToken, clean(preview.stage))} · ${clean(preview.action)} · ${
-                clean(preview.tool)
-            }`,
+            `${theme.fg(stageToken, stageIcon + clean(preview.stage))} | ${
+                clean(preview.action)
+            } | ${clean(preview.tool)}`,
             ...(preview.focus
                 ? [
                     preview.tool === "bash" || preview.tool === "powershell"
@@ -81,7 +86,13 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
             `${s.sign} ${clean(s.text)}`,
         )
     ) ?? [];
-    return [...metadata, ...activity, ...(diff.length ? ["", ...diff, ""] : [])];
+    // Snippets are bounded proposed changes, not a complete or verified diff. Leave bottom
+    // padding to the host tool shell rather than adding a redundant trailing blank row.
+    return [
+        ...metadata,
+        ...activity,
+        ...(diff.length ? ["", theme.fg("muted", "..."), ...diff, theme.fg("muted", "...")] : []),
+    ];
 }
 
 /** Escaping report prose prevents tool/model data from injecting headings, links or code fences. */
@@ -120,7 +131,7 @@ export function reportMarkdown(run: RunResult): string {
         `## Verification\n\n${list(report?.verification ?? [])}`,
         `## Findings\n\n${
             report?.findings.length
-                ? report.findings.map((f) => `- **${md(f.severity)}** — ${md(f.text)}`).join("\n")
+                ? report.findings.map((f) => `- **${md(f.severity)}** - ${md(f.text)}`).join("\n")
                 : "_None reported; not a review certificate._"
         }`,
         `## Limitations\n\n${list(report?.limitations ?? [])}`,
@@ -140,7 +151,7 @@ export function reportMarkdown(run: RunResult): string {
         `## Linked checks\n\n${
             report?.checks.length
                 ? report.checks.map((c) =>
-                    `- **${md(c.verdict)}** → ${md(c.target)}\n  - ${md(c.reason)}\n  - Evidence: ${
+                    `- **${md(c.verdict)}** > ${md(c.target)}\n  - ${md(c.reason)}\n  - Evidence: ${
                         ids(c.evidence)
                     }`
                 ).join("\n")
@@ -149,9 +160,9 @@ export function reportMarkdown(run: RunResult): string {
         `## Evidence\n\n${
             run.evidence?.length
                 ? run.evidence.map((e) =>
-                    `- **${md(e.id)}** · ${md(e.tool)} · ${
+                    `- **${md(e.id)}** | ${md(e.tool)} | ${
                         e.isError ? "failed retrieval" : "retrieved (not proof)"
-                    }\n  - ${md(e.inspection)} · ${md(e.retrievedAt)} · owner ${md(e.owner)}`
+                    }\n  - ${md(e.inspection)} | ${md(e.retrievedAt)} | owner ${md(e.owner)}`
                 ).join("\n")
                 : "_No retrieval packets._"
         }`,
@@ -159,7 +170,7 @@ export function reportMarkdown(run: RunResult): string {
             md(run.profile)
         }\n- **Model / thinking:** ${md(run.model)} / ${md(run.thinking)}\n- **Status:** ${
             md(run.status)
-        } — completion does not imply independent review\n- **Task:** ${
+        } - completion does not imply independent review\n- **Task:** ${
             md(run.task)
         }\n- **Inputs:** ${ids(run.inputs ?? [])}\n- **Owned paths:** ${
             ids(run.writePaths ?? [])
@@ -206,7 +217,7 @@ export class AgentCards implements Component {
                     wrapTextWithAnsi(line, width).map((wrapped) =>
                         // The wrapper can emit a two-column grapheme at width 1. Use a plain
                         // placeholder rather than truncation's full reset, preserving the host background.
-                        visibleWidth(wrapped) > width ? "…" : wrapped
+                        visibleWidth(wrapped) > width ? ".".repeat(Math.min(3, width)) : wrapped
                     )
                 ),
             );

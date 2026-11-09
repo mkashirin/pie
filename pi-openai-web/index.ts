@@ -13,7 +13,7 @@ import {
 import { WebCall, WebStatus, WebView } from "./src/presentation.ts";
 import { basePacket, failPacket, toolResult } from "./src/results.ts";
 import { Runtime } from "./src/runtime.ts";
-import { type Packet, PacketSchema, PageParams, SearchParams } from "./src/schemas.ts";
+import { PacketSchema, PageParams, SearchParams } from "./src/schemas.ts";
 
 export default function openaiWeb(pi: ExtensionAPI) {
     const runtime = new Runtime();
@@ -86,11 +86,12 @@ export default function openaiWeb(pi: ExtensionAPI) {
     });
     pi.registerMessageRenderer(
         "pi-openai-web-status",
-        (message) =>
+        (message, options) =>
             new WebStatus(
                 typeof message.content === "string"
                     ? message.content
                     : JSON.stringify(message.content),
+                options?.outputPad ?? 1,
             ),
     );
     const guidelines = [
@@ -118,7 +119,7 @@ export default function openaiWeb(pi: ExtensionAPI) {
         options: { expanded: boolean },
         theme: import("@earendil-works/pi-coding-agent").Theme,
     ) => new WebView(
-        result.details as Packet | undefined,
+        result.details,
         result.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join(
             "\n",
         ),

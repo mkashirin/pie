@@ -15,7 +15,7 @@ import type { ActiveImplementationPlan, PlanModeState } from "./state.ts";
 
 export function retentionLabel(retention: ImplementationPlanRetention) {
     return {
-        "clear-on-start": "Off — conversation history only",
+        "clear-on-start": "Off - conversation history only",
         "clear-after-first-run": "Through first implementation run",
         keep: "Until manually cleared",
     }[retention];

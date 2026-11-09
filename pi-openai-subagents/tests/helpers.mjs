@@ -1,4 +1,5 @@
-import { createAssistantMessageEventStream, Type } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import { createJiti } from "jiti";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
@@ -9,6 +10,7 @@ export const policies = await jiti.import("../src/policy.ts");
 export const state = await jiti.import("../src/state.ts");
 export const scheduling = await jiti.import("../src/scheduler.ts");
 export const runtime = await jiti.import("../src/runtime.ts");
+export const promptInputs = await jiti.import("../src/prompt-inputs.ts");
 export const commands = await jiti.import("../src/commands.ts");
 export const ui = await jiti.import("../src/ui.ts");
 export const activity = await jiti.import("../src/activity.ts");

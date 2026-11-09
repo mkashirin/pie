@@ -51,7 +51,7 @@ export function activityPreview(
             snippet("-", first.oldText ?? first.old_string);
             snippet("+", first.newText ?? first.new_string);
             if (Array.isArray(v.edits) && v.edits.length > 1) {
-                focus += ` · +${v.edits.length - 1} replacements`;
+                focus += ` | +${v.edits.length - 1} replacements`;
             }
         } else snippet("+", v.content);
     } else if (["bash", "powershell"].includes(tool) && ["worker", "reviewer"].includes(profile)) {
@@ -63,10 +63,10 @@ export function activityPreview(
             : "source search";
         const queries = Array.isArray(v.queries) ? v.queries : [];
         focus = bounded(queries[0]);
-        if (queries.length > 1) focus += ` · +${queries.length - 1} queries`;
+        if (queries.length > 1) focus += ` | +${queries.length - 1} queries`;
     } else if (tool === "web_action") {
         action = "source action";
-        focus = [bounded(v.action ?? v.operation), bounded(v.url)].filter(Boolean).join(" · ");
+        focus = [bounded(v.action ?? v.operation), bounded(v.url)].filter(Boolean).join(" | ");
     } else if (tool === "read") {
         action = profile === "reviewer" ? "inspection" : "read focus";
         // Reserve space for the complete window even when the input path is very long.
@@ -83,7 +83,7 @@ export function activityPreview(
         focus += `:${start}-${end}`;
     } else if (["grep", "find", "symbol_search", "ast_grep_search"].includes(tool)) {
         action = "search focus";
-        focus = [bounded(v.pattern ?? v.query), path].filter(Boolean).join(" · ");
+        focus = [bounded(v.pattern ?? v.query), path].filter(Boolean).join(" | ");
     } else if (
         [
             "read_symbol",
@@ -97,12 +97,12 @@ export function activityPreview(
         action = profile === "reviewer" ? "inspection" : "symbol focus";
         focus = [bounded(v.operation), path, bounded(v.symbol ?? v.symbolName ?? v.name)].filter(
             Boolean,
-        ).join(" · ");
+        ).join(" | ");
         if (typeof v.line === "number") focus += `:${v.line}`;
     }
     if (profile === "research-validator") {
-        action = `validate · ${action}`;
-        if (targets.length) focus = `target ${bounded(targets[0], 80)} · ${focus}`;
+        action = `validate | ${action}`;
+        if (targets.length) focus = `target ${bounded(targets[0], 80)} | ${focus}`;
     }
     return freezePreview({
         tool: bounded(tool, 80),

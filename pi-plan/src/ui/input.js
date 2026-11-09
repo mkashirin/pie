@@ -73,7 +73,7 @@ export function createInputComponent(options) {
                         safeWidth,
                     )
                     : []),
-                ...(submitting ? [options.theme.fg("dim", "Saving…")] : []),
+                ...(submitting ? [options.theme.fg("dim", "Saving...")] : []),
             ];
             return renderFrame(
                 options.screen.title,

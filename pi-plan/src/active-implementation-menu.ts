@@ -29,7 +29,7 @@ export async function showActiveImplementationMenu(
                 lines: [options.statusText],
                 items: [
                     { id: "show", label: "Show active implementation plan", action: "show" },
-                    { id: "export", label: "Export plan…", to: "export" },
+                    { id: "export", label: "Export plan...", to: "export" },
                     { id: "settings", label: "Settings", action: "settings" },
                     { id: "start-new", label: "Start a new plan", action: "start-new" },
                     { id: "clear", label: "Clear active implementation plan", action: "clear" },

@@ -142,7 +142,8 @@ export async function loadConfiguration(
 }
 
 export function eligible(model: Model<Api> | undefined): model is Model<Api> {
-    return !!model && model.provider === "openai" && model.api === "openai-responses";
+    return !!model && ["openai", "openai-multi"].includes(model.provider)
+        && model.api === "openai-responses";
 }
 
 export function resolveModel(
@@ -155,8 +156,8 @@ export function resolveModel(
     if (!eligible(selected)) {
         throw new Error(
             settings.model
-                ? `Configured model ${settings.model} is unavailable or not a physical openai/openai-responses model; no fallback is allowed`
-                : "Select a physical openai/openai-responses model or set /openai-web set model openai/<model-id>",
+                ? `Configured model ${settings.model} is unavailable or not a physical openai or openai-multi model using openai-responses; no fallback is allowed`
+                : "Select a physical openai or openai-multi model using openai-responses or set /openai-web set model provider/<model-id>",
         );
     }
     // Plain snapshot: a batch never consults a later foreground selection.

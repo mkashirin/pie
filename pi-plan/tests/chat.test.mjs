@@ -45,7 +45,7 @@ test("question calls and answers are Markdown cards, not serialized JSON", () =>
             theme,
         );
         const rendered = text(card, 100);
-        assert.match(rendered, /Plan · Answers · answered/u);
+        assert.match(rendered, /Plan \| Answers \| answered/u);
         assert.match(rendered, /Answer: 1\. Focused source modules/u);
         assert.match(rendered, /including notes/u);
         assert.ok(!rendered.includes("\"cancelled\""));
@@ -63,7 +63,7 @@ test("cards wrap words and long tokens without ellipsis, with resize and invalid
         "ready",
     );
     assert.match(text(card, 16), /ordinary words\nstay intact/u);
-    assert.ok(!text(card, 16).includes("…"));
+    assert.ok(!text(card, 16).includes("..."));
     assert.equal(text(card, 16).split("\n\n").at(-1).replaceAll("\n", ""), token);
     for (const width of [0, 1, 2, 8, 16, 40, 100]) {
         card.invalidate();
@@ -92,7 +92,7 @@ test("cancelled, partial and completed tool surfaces stay readable and sanitize 
         { isPartial: false },
         theme,
     );
-    assert.match(text(complete, 100), /Plan · ready/u);
+    assert.match(text(complete, 100), /Plan \| ready/u);
     assert.match(text(complete, 100), /Keep ordinary words together/u);
     const hostile = questions.planModeQuestionAnswered([question], [{
         header: "Literal heading",

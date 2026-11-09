@@ -60,12 +60,15 @@ Precedence: environment > trusted project > user > defaults.
 | searchTimeoutMs   | SEARCH_TIMEOUT_MS                     | 120000 / 1000–600000      |
 | pageTimeoutMs     | PAGE_TIMEOUT_MS                       | 30000 / 1000–120000       |
 
-Explicit model must be physical `openai` / `openai-responses`; invalid explicit selection never
-falls back. Otherwise use the eligible active model. Each batch snapshots its model. Authentication
-stays with Pi. Status and startup never obtain or refresh tokens or make network requests. Auth
-presence is not verification. The SDK exposes no factory loading cwd/trust: tools first register at
-session_start. Initially disabled configurations register no tools; disabling existing tools
-re-registers them hidden and execution still checks enabled. Commands remain usable.
+Explicit model must be physical `openai` or `openai-multi` using `openai-responses`; invalid
+explicit selection never falls back. Otherwise use the eligible active model. Each batch snapshots
+its model. Authentication uses the session model registry; managed `openai-multi` accounts use
+`/openai-accounts`. No separate account preference or saved configuration change is required.
+Virtual models and similarly named arbitrary providers are rejected. Status and startup never
+obtain or refresh tokens or make network requests. Auth presence is not verification. The SDK
+exposes no factory loading cwd/trust: tools first register at session_start. Initially disabled
+configurations register no tools; disabling existing tools re-registers them hidden and execution
+still checks enabled. Commands remain usable.
 
 Search and page reads share a cancellable semaphore. Queue time counts toward per-request
 deadlines; shutdown/replacement cancels queued and active work, including calls awaiting
@@ -106,8 +109,9 @@ warnings/errors, fallback text, and `/openai-web` status/configuration messages.
   resetting Pi's background. Colors are evaluated when rendering so theme invalidation retains no
   stale styled text. Untrusted terminal controls are sanitized before rendering.
 - At one-column widths, over-wide graphemes use reversible ASCII `\\u{...}` escapes. Nonpositive or
-  nonfinite widths render nothing. Status messages keep one-column horizontal margins when space
-  permits and omit them at widths one and two.
+  nonfinite widths render nothing. Status/configuration messages honor Pi's `outputPad` setting
+  (`0` or `1`), including changes made in `/settings`. One-column margins are omitted at widths one
+  and two; wrapping uses the remaining content width. Tool-shell margins remain owned by Pi.
 
 Collapsed warnings appear one per logical line with a `Warning:` prefix, preserving each warning's
 own punctuation. Duplicate warnings (including the two native-fee wording variants) are

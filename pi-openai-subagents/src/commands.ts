@@ -83,7 +83,7 @@ export async function command(host: CommandHost, args: string, ctx: ExtensionCom
         message(
             host,
             [...config.definitions.values()].map((d) =>
-                `${d.name} [${d.profile}] — ${d.description}\n  ${d.source}`
+                `${d.name} [${d.profile}] - ${d.description}\n  ${d.source}`
             ).join("\n"),
         );
         return;
@@ -101,7 +101,7 @@ export async function command(host: CommandHost, args: string, ctx: ExtensionCom
                 );
             } catch (error) {
                 lines.push(
-                    `${d.name}: ${a.ref} (${a.modelSource}), thinking ${a.thinking} — ${
+                    `${d.name}: ${a.ref} (${a.modelSource}), thinking ${a.thinking} - ${
                         String(error)
                     }`,
                 );
@@ -119,7 +119,7 @@ export async function command(host: CommandHost, args: string, ctx: ExtensionCom
                 || (t.exposure === "direct" && active.has(t.name))
                 || (name === "orchestrator" && t.exposure === "model-only" && active.has(t.name));
             const decision = policyDecision(config, mode.settings, d, t, name !== "orchestrator");
-            return `${t.name}: ${classify(t, overrides)} — ${
+            return `${t.name}: ${classify(t, overrides)} - ${
                 !available
                     ? "not callable"
                     : decision.reason

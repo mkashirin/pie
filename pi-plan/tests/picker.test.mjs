@@ -16,7 +16,17 @@ const runtime = { getState: () => undefined };
 
 const text = (frame) => frame.map(plain);
 
-const selected = (frame) => text(frame).filter((line) => /^[→│]/u.test(line));
+const selected = (frame) => {
+    const rows = text(frame);
+    // The search input also has an ASCII > prompt; the selected item follows it.
+    const start = rows.findLastIndex((line) => /^>/u.test(line));
+    if (start < 0) return [];
+    const selectedRows = [rows[start]];
+    for (let index = start + 1; index < rows.length && /^│/u.test(rows[index]); index++) {
+        selectedRows.push(rows[index]);
+    }
+    return selectedRows;
+};
 
 const menuFor = (screen, actions = {}) =>
     defineMenu({ start: "main", screens: { main: () => screen }, actions });
@@ -47,14 +57,14 @@ test("strict whitespace wrapping, indivisible URLs/CJK/emoji and grapheme-safe e
         "from Plan Mode",
     ]);
     assert.deepEqual(wrapWords("alpha beta gamma", 8).map(plain), ["alpha", "beta", "gamma"]);
-    assert.deepEqual(wrapWords("x abcdefghijkl y", 7).map(plain), ["x", "abcdef…", "y"]);
+    assert.deepEqual(wrapWords("x abcdefghijkl y", 7).map(plain), ["x", "abcd...", "y"]);
     assert.deepEqual(wrapWords("https://example.test/very-long-id next", 12).map(plain), [
-        "https://exa…",
+        "https://e...",
         "next",
     ]);
-    assert.deepEqual(wrapWords("👩‍💻👩‍💻👩‍💻 end", 5).map(plain), ["👩‍💻👩‍💻…", "end"]);
-    assert.deepEqual(wrapWords("界界界 abc", 5).map(plain), ["界界…", "abc"]);
-    assert.deepEqual(wrapWords("e\u0301".repeat(5), 4).map(plain), ["e\u0301e\u0301e\u0301…"]);
+    assert.deepEqual(wrapWords("👩‍💻👩‍💻👩‍💻 end", 5).map(plain), ["👩‍💻...", "end"]);
+    assert.deepEqual(wrapWords("界界界 abc", 5).map(plain), ["界...", "abc"]);
+    assert.deepEqual(wrapWords("e\u0301".repeat(5), 4).map(plain), ["e\u0301..."]);
     assert.deepEqual(wrapWords("a\t b\n c", 3), ["a b", "c"]);
     assert.deepEqual(wrapWords("\x1b[31malpha\x1b[0m \u202ebeta", 5), ["alpha", "beta"]);
     assert.deepEqual(wrapWords("\x1b]8;;https://evil\x07safe\x1b]8;;\x07", 8), ["safe"]);
@@ -88,18 +98,18 @@ test(
                 width: 18,
             });
             assert.deepEqual(selected(tui.render()), [
-                "→ Start fresh and",
-                "│ implement · Keep",
+                "> Start fresh and",
+                "│ implement | Keep",
                 "│ approved plan",
                 "│ intact",
             ]);
             const wide = tui.resize({ width: 70, rows: 60 });
             assert.ok(
-                text(wide).includes("→ Start fresh and implement · Keep approved plan intact"),
+                text(wide).includes("> Start fresh and implement | Keep approved plan intact"),
             );
             assert.deepEqual(selected(tui.resize({ width: 18 })), [
-                "→ Start fresh and",
-                "│ implement · Keep",
+                "> Start fresh and",
+                "│ implement | Keep",
                 "│ approved plan",
                 "│ intact",
             ]);
@@ -158,7 +168,7 @@ test(
                     const frame = resized.render(width);
                     bounded(frame, width, rows);
                     assert.ok(
-                        selected(frame).some((line) => line.startsWith("→")),
+                        selected(frame).some((line) => line.startsWith(">")),
                         `${kind} width ${width} height ${rows}: ${JSON.stringify(frame)}`,
                     );
                     resized.dispose();
@@ -220,7 +230,7 @@ test("empty and no-match statuses wrap at narrow widths with physical-row pinnin
                 assert.deepEqual(lines.slice(start, start + messageRows.length), messageRows);
                 assert.ok(lines.some((line) => line.includes(">")), JSON.stringify(lines));
                 if (kind === "multiSelect") {
-                    assert.deepEqual(selected(frame), ["→ Done"]);
+                    assert.deepEqual(selected(frame), ["> Done"]);
                     assert.ok(lines.includes("Helpful"));
                     assert.ok(lines.includes("words"));
                 }
@@ -231,7 +241,7 @@ test("empty and no-match statuses wrap at narrow widths with physical-row pinnin
                     const frame = component.render(width);
                     bounded(frame, width, rows);
                     if (kind === "multiSelect") {
-                        assert.ok(selected(frame).some((line) => line.startsWith("→")));
+                        assert.ok(selected(frame).some((line) => line.startsWith(">")));
                     }
                     assert.equal(component.focused, true);
                 }
@@ -288,14 +298,14 @@ test("search reminders wrap and retain selected rows and description-tail indexi
             assert.equal(lines[reminderIndex + 1], "search");
             assert.ok(lines.includes("Helpful"));
             assert.ok(lines.includes("words"));
-            assert.ok(selected(frame).some((line) => line.startsWith("→")));
+            assert.ok(selected(frame).some((line) => line.startsWith(">")));
         }
         for (const rows of [4, 5, 8, 12, 24]) {
             tui.terminal.rows = rows;
             for (const width of [1, 2, 3, 8, 12, 18]) {
                 const frame = component.render(width);
                 bounded(frame, width, rows);
-                assert.ok(selected(frame).some((line) => line.startsWith("→")));
+                assert.ok(selected(frame).some((line) => line.startsWith(">")));
             }
         }
         component.dispose();
@@ -400,7 +410,7 @@ test(
             },
         }, { width: 20 });
         assert.deepEqual(selected(tui.render()), [
-            "→ Fresh",
+            "> Fresh",
             "│ implementation",
             "│ model: Same as",
             "│ plan",
@@ -448,7 +458,7 @@ test(
                     disabledReason: "Policy disallows this tool",
                 },
             ],
-            actions: [{ id: "done:raw", label: "Done — start with this policy", action: "done" }],
+            actions: [{ id: "done:raw", label: "Done - start with this policy", action: "done" }],
         };
         const { tui, running } = await open(screen, {
             toggle: ({ itemId, selected }) => {
@@ -461,7 +471,7 @@ test(
             },
         }, { width: 22 });
         assert.deepEqual(selected(tui.render()), [
-            "→ [ ] Read repository",
+            "> [ ] Read repository",
             "│ metadata and",
             "│ documentation",
         ]);
@@ -475,7 +485,7 @@ test(
         await tui.waitForPending();
         assert.equal(changes.length, 1);
         tui.type("no-matching-toggle");
-        assert.deepEqual(selected(tui.render()), ["→ Done — start with", "│ this policy"]);
+        assert.deepEqual(selected(tui.render()), ["> Done - start with", "│ this policy"]);
         assert.match(text(tui.render()).join("\n"), /No matching items/);
         tui.press("tui.select.confirm");
         await tui.waitForPending();
@@ -686,13 +696,13 @@ test(
             },
         });
         await tui.waitForOpen();
-        assert.deepEqual(selected(tui.render()), ["→ [ ] Read repository", "│ metadata and docs"]);
+        assert.deepEqual(selected(tui.render()), ["> [ ] Read repository", "│ metadata and docs"]);
         tui.send(" ");
         await tui.waitForPending();
         await tui.waitForOpen();
         tui.press("tui.select.down");
         // At 24 columns, the 2-cell selection inset leaves 22 cells for text.
-        assert.deepEqual(selected(tui.render()), ["→ Done — start with this", "│ policy"]);
+        assert.deepEqual(selected(tui.render()), ["> Done - start with this", "│ policy"]);
         tui.press("tui.select.confirm");
         await tui.waitForPending();
         await running;
@@ -718,7 +728,7 @@ test("real Plan Mode main menu uses the questionnaire arrow marker", async () =>
         },
     });
     await tui.waitForOpen();
-    assert.deepEqual(selected(tui.render()), ["→ Start Plan mode"]);
+    assert.deepEqual(selected(tui.render()), ["> Start Plan mode"]);
     tui.press("tui.select.confirm");
     await running;
     assert.equal(started, true);
@@ -730,7 +740,7 @@ test("real Plan Mode caller retains upstream RPC labels and unsupported-mode rou
         title: "Plan mode\nReady\nPolicy",
         options: [
             "Start Plan mode",
-            "Choose tools, then start…",
+            "Choose tools, then start...",
             "Settings",
             "How Plan mode works",
         ],

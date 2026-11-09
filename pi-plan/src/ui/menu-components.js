@@ -126,7 +126,7 @@ function createChoiceComponent(options) {
         handleSearchInput(searchInput, restoredSearchQuery);
     }
     const allItems = options.screen.items.map((item) => {
-        const current = item.id === options.screen.currentItemId ? " ✓ current" : "";
+        const current = item.id === options.screen.currentItemId ? " x current" : "";
         const unavailable = item.disabled
             ? `unavailable${item.disabledReason ? `: ${safeMenuText(item.disabledReason)}` : ""}`
             : undefined;
@@ -139,7 +139,7 @@ function createChoiceComponent(options) {
                 label: `${item.disabled ? "[-] " : ""}${label}${current}`,
                 description: [unavailable, description]
                     .filter((value) => Boolean(value))
-                    .join(" · ") || undefined,
+                    .join(" | ") || undefined,
             },
             searchText: [
                 safeChoiceText(item.label),
@@ -625,7 +625,7 @@ function settingsHint(keybindings) {
         ...(confirmKeys ? [`${confirmKeys} to change`] : []),
         ...(cancelKeys ? [`${cancelKeys} to go back`] : []),
         "Ctrl+C to close",
-    ].join(" · ");
+    ].join(" | ");
 }
 
 function uniqueHintKeys(keys) {
@@ -646,10 +646,10 @@ function displayHintKey(key) {
         return "Ctrl+C";
     }
     if (key === "up") {
-        return "↑";
+        return "^";
     }
     if (key === "down") {
-        return "↓";
+        return "v";
     }
     return safeMenuText(key);
 }

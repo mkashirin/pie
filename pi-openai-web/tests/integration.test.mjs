@@ -139,6 +139,21 @@ test("installed Pi loader/runner/wrapper: disabled registration, no UI/network s
         );
         assert.equal(Value.Check(PacketSchema, result.structuredContent), true);
         assert.equal(result.isError, true); // No physical active model: fail closed before transport.
+        // Host-generated errors bypass execute() and carry {} rather than a web Packet.
+        for (const { definition } of runner.getAllRegisteredTools()) {
+            for (const expanded of [false, true]) {
+                const view = definition.renderResult(
+                    {
+                        content: [{ type: "text", text: "fixture permission veto\x07" }],
+                        details: {},
+                    },
+                    { expanded, isPartial: false },
+                    { fg: (_color, text) => text },
+                );
+                assert.deepEqual(view.render(80), ["", "fixture permission veto"]);
+                assert.ok(view.render(8).every((line) => visibleWidth(line) <= 8));
+            }
+        }
         loaded.handlers.set("tool_call", [
             () => ({ block: true, reason: "fixture permission veto" }),
         ]);

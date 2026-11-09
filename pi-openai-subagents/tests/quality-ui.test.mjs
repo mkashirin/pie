@@ -71,7 +71,7 @@ const validationRun = (id, targets, extra = {}) =>
 
 const unresolvedGaps = (ledger) => ledger.gaps().filter((gap) => gap.startsWith("Unresolved"));
 
-test("checks are run-linked, review coverage is invalidated by new changes, and reminders are bounded", async (t) => {
+test("reviews stay fresh for their target run while later changes need their own review", async (t) => {
     const h = await harness(t, {
         stream: (m) =>
             stream(m, [
@@ -124,10 +124,14 @@ test("checks are run-linked, review coverage is invalidated by new changes, and 
         stream(m, [
             call("agent_report", report({ changeStatus: "changed", changes: ["src/y.ts"] })),
         ]);
-    await h.execute("subagents_run", { tasks: [{ agent: "worker", task: "Further changes" }] });
-    const stale = (await h.emit("agent_before_settle", { outcome: "completed" }))[0];
-    assert.equal(stale.continue, false);
-    assert.match(stale.entries[0].content, /stale/);
+    const laterWorker = await h.execute("subagents_run", {
+        tasks: [{ agent: "worker", task: "Further changes" }],
+    });
+    const laterID = laterWorker.result.details.results[0].id;
+    const followup = (await h.emit("agent_before_settle", { outcome: "completed" }))[0];
+    assert.equal(followup.continue, false);
+    assert.match(followup.entries[0].content, new RegExp(laterID));
+    assert.doesNotMatch(followup.entries[0].content, new RegExp(id));
     await h.command("off");
     assert.equal((await h.emit("agent_before_settle", { outcome: "completed" }))[0], undefined);
 });
@@ -217,6 +221,23 @@ test("blocking and insufficient verdicts remain visible; unrelated checks do not
     );
     assert.ok(ledger.gaps().some((x) => /Unresolved/.test(x)));
 });
+test("review freshness is per target: unrelated mutations do not stale checks, target mutations do", () => {
+    const ledger = new state.Ledger();
+    ledger.putRun(qualityRun("worker-a", "worker", { changed: true, revision: 1 }));
+    ledger.putRun(qualityRun("worker-b", "worker", { changed: true, revision: 2 }));
+    ledger.putRun(reviewRun("review-both", ["worker-a", "worker-b"], {
+        reviewRevision: 2,
+    }));
+    assert.deepEqual(ledger.gaps(), []);
+
+    ledger.mutation(ledger.runs.get("worker-b"));
+    assert.deepEqual(ledger.gaps(), [
+        "Review required for worker-b (worker); changes/side effects are unreviewed or review is stale",
+    ]);
+
+    ledger.putRun(reviewRun("review-b", ["worker-b"], { reviewRevision: 3 }));
+    assert.deepEqual(ledger.gaps(), []);
+});
 test("blocker, repair and fresh linked independent review clear historical quality warnings", () => {
     const ledger = new state.Ledger();
     ledger.putRun(qualityRun("widget-worker", "worker", { changed: true }));
@@ -251,9 +272,11 @@ test("blocker, repair and fresh linked independent review clear historical quali
         data: structuredClone([...ledger.runs.values()]),
     }]).ledger;
     assert.deepEqual(restored.gaps(), []);
-    ledger.mutation();
-    assert.ok(ledger.gaps().some((gap) => gap.startsWith("Review required")));
-    assert.ok(unresolvedGaps(ledger).some((gap) => gap.includes("blocking-review")));
+    ledger.mutation(ledger.runs.get("repair-worker"));
+    assert.deepEqual(ledger.gaps(), [
+        "Review required for repair-worker (worker); changes/side effects are unreviewed or review is stale",
+    ]);
+    assert.deepEqual(unresolvedGaps(ledger), []);
 });
 test("scout and worker insufficient checks clear only after a same-target independent pass", () => {
     const ledger = new state.Ledger();

@@ -1,4 +1,5 @@
-import { type Static, Type, type Usage } from "@earendil-works/pi-ai";
+import type { Usage } from "@earendil-works/pi-ai";
+import { type Static, Type } from "typebox";
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import type { ActivityPreview } from "./activity.ts";
@@ -267,7 +268,6 @@ export class Ledger {
         const reviewers = runs.filter((r) =>
             r.profile === "reviewer" && independentReport(r) && r.report?.verification.length
             && r.toolActivity.some((t) => !t.isError && ["read", "execute"].includes(t.capability))
-            && r.reviewRevision >= this.revision
         );
         const validators = runs.filter((r) =>
             r.profile === "research-validator" && independentReport(r)
@@ -321,7 +321,15 @@ export class Ledger {
 
                 const grounded = kind === "review"
                     || (c.evidence.length > 0 && c.evidence.every(knownEvidence));
-                if (clean && grounded && authorized[kind].has(r) && linked(r, c.target)) {
+                const targetRun = this.runs.get(c.target);
+                // A later mutation to this target makes the review stale; mutations to other
+                // runs must not globally revoke its run-linked coverage.
+                const fresh = kind !== "review" || !targetRun
+                    || r.reviewRevision >= targetRun.revision;
+                if (
+                    clean && grounded && fresh && authorized[kind].has(r)
+                    && linked(r, c.target)
+                ) {
                     outcomes[kind].set(c.target, { run: r, index, successful: true });
                 }
             }

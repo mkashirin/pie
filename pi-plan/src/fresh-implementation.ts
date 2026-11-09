@@ -147,7 +147,7 @@ export async function startFreshImplementationSession(
     let setupError: string | undefined;
     let kickoffError: string | undefined;
 
-    if (ctx.mode === "rpc") safeNotify(ctx, "Starting fresh implementation session…", "info");
+    if (ctx.mode === "rpc") safeNotify(ctx, "Starting fresh implementation session...", "info");
 
     let result: Awaited<ReturnType<ExtensionCommandContext["newSession"]>>;
     try {
@@ -427,5 +427,5 @@ function safeErrorDetail(error: unknown) {
         .replace(/\s+/gu, " ")
         .trim() || "unknown error";
     const characters = [...normalized];
-    return characters.length > 500 ? `${characters.slice(0, 499).join("")}…` : normalized;
+    return characters.length > 500 ? `${characters.slice(0, 497).join("")}...` : normalized;
 }

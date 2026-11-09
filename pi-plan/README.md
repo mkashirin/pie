@@ -18,6 +18,9 @@ The local presentation fixes are also retained:
 - Chat tool calls and results use compact, themed Markdown cards rather than raw JSON. Questions,
   numbered choices, answers, notes, cancellation, and completed plans remain readable on resize.
   Chat prose wraps at words without ellipsis cuts; oversized chat tokens wrap at graphemes.
+- Displayed proposed/saved/active plans and recovered input honor Pi's `outputPad` setting (`0` or
+  `1`), including changes made in `/settings`. Tool cards retain Pi's native shell margins; the
+  persistent widget remains full-width and independent of transcript padding.
 - Questionnaire number keys immediately choose an answer and advance. The next option number opens
   Other (free-form). Review still requires Enter; digits in answer/note editors remain ordinary
   text. Existing arrows, Enter, navigation, and cancellation continue to work.

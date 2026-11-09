@@ -62,7 +62,7 @@ for (const width of [80, 100]) {
                     "EDITOR: ───────────────────",
                 ),
                 widgetsBelow: text(),
-                footer: text("FOOTER: ~/project (main)", "FOOTER: 12k tokens · model · high"),
+                footer: text("FOOTER: ~/project (main)", "FOOTER: 12k tokens | model | high"),
                 scrollbar: "hidden",
             });
             const lines = renderLayoutFrame(viewport.root, width, 24, () => {}).lines.map(
@@ -72,7 +72,7 @@ for (const width of [80, 100]) {
             assert.ok(lines.every((line) => visibleWidth(line) <= width));
             assert.deepEqual(
                 lines.filter((line) => /^worker-/.test(line)),
-                Array.from({ length: count }, (_, i) => `worker-${i} · running · 1s`),
+                Array.from({ length: count }, (_, i) => `worker-${i} | running | 1s`),
             );
             assert.doesNotMatch(lines.join("\n"), /OLD_|NEW_|long-path|long-model|proposed|#/);
             for (
@@ -121,18 +121,27 @@ test("long tool/path arguments never enter fleet but remain in live chat preview
             });
             const before = JSON.stringify(row);
             assert.deepEqual(fleet([row]).render(2000), [
-                "Agents · 1 calls · 1 runs",
-                "worker-0 · running · 1s",
+                "Agents | 1 calls | 1 runs",
+                "worker-0 | running | 1s",
             ]);
             assert.deepEqual(presentation.compactRunLines(row, theme, true), [
-                "worker-0 · running · 1s",
+                "worker-0 | running | 1s",
             ]);
             for (const expanded of [false, true]) {
                 const chat = new presentation.AgentCards([row], theme, expanded).render(2000);
-                assert.equal(chat[0], "worker-0 · running");
-                assert.equal(chat[1], `Role: ${profile} · Model: ${row.model}`);
-                assert.equal(chat[2], "Elapsed: 1s · 0 turns");
-                assert.equal(chat[3], `${stage} · ${preview.action} · ${tool}`);
+                assert.equal(chat[0], "worker-0 | running");
+                assert.equal(chat[1], `Role: ${profile} | Model: ${row.model}`);
+                assert.equal(chat[2], "Elapsed: 1s | 0 turns");
+                assert.equal(
+                    chat[3],
+                    `${
+                        stage === "succeeded"
+                            ? "x "
+                            : stage === "failed"
+                            ? "x "
+                            : ""
+                    }${stage} | ${preview.action} | ${tool}`,
+                );
                 assert.equal(
                     chat[4],
                     tool === "bash"
@@ -147,7 +156,7 @@ test("long tool/path arguments never enter fleet but remain in live chat preview
                 assert.deepEqual(
                     chat.slice(stage === "succeeded" ? 6 : 5),
                     preview.snippets.length
-                        ? ["", ...preview.snippets.map((s) => `${s.sign} ${s.text}`), ""]
+                        ? ["", "...", ...preview.snippets.map((s) => `${s.sign} ${s.text}`), "..."]
                         : [],
                 );
             }
@@ -171,7 +180,7 @@ test("status-only fleet sanitizes names, clips widths and styles at render time 
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
         assert.ok(plain.every((line) => !line.startsWith(" ")));
         assert.ok(plain.every((line) => !/[\x00-\x1f\x7f-\x9f\u202e]/.test(line)));
-        if (width >= 80) assert.equal(plain[1], "worker SAFE · running · 1s");
+        if (width >= 80) assert.equal(plain[1], "worker SAFE | running | 1s");
     }
     const before = component.render(80);
     const tokens = [];

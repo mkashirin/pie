@@ -12,6 +12,7 @@ import type {
 import { completePlanArguments } from "./command.ts";
 import {
     renderPlanCompletionCall,
+    renderPlanMessage,
     renderPlanQuestionCall,
     renderPlanQuestionResult,
 } from "./chat.ts";
@@ -167,6 +168,11 @@ interface PlanModeDependencies {
 // Keep session state, persistence, tool, thinking, and mutex commits in this one closure so an
 // activation path cannot bypass the same atomic transition by crossing module-owned state.
 export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDependencies = {}) {
+    for (
+        const type of [PROPOSED_PLAN_MESSAGE_TYPE, RECOVERED_RUNTIME_ADMISSION_INPUT_MESSAGE_TYPE]
+    ) {
+        pi.registerMessageRenderer(type, renderPlanMessage);
+    }
     const workflowMutex = new WorkflowMutex(pi);
     let workflowOwner: WorkflowMutexOwner | undefined;
     let currentSession: object | undefined;
@@ -1417,8 +1423,8 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
         );
         await ui.showPlanLaunchMenu(ctx, {
             statusText: planModeHelperToolsAvailable(safeGetActiveTools())
-                ? "Status: Off — visible Plan helpers stay inactive until /plan starts."
-                : ("Status: Off — required Plan helpers are unavailable under "
+                ? "Status: Off - visible Plan helpers stay inactive until /plan starts."
+                : ("Status: Off - required Plan helpers are unavailable under "
                     + "the active tool policy."),
             initialScreen,
             getSelectedNames: () => snapshotPlanModeSelectedNames(tools, toolSelectionSnapshot()),
@@ -1457,7 +1463,7 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
                     const description = tool.description ?? "No description available";
                     return {
                         name: tool.name,
-                        description: `${policy} · ${description}`,
+                        description: `${policy} | ${description}`,
                         searchText: [policy, description].join(" "),
                         disabled: !selectable || !active,
                         disabledReason: !active
@@ -1474,7 +1480,7 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
                     return {
                         name,
                         label,
-                        description: "pending registration · Retained and resolved before the "
+                        description: "pending registration | Retained and resolved before the "
                             + "first Plan request",
                         searchText: `${label} pending registration retained first Plan request`,
                         disabled: true,
@@ -2268,18 +2274,18 @@ export default function planMode(pi: ExtensionAPI, dependencies: PlanModeDepende
 
     function terminalToolName(value: string) {
         const safe = safeTerminalText(value) || "(unnamed tool)";
-        return safe.length > 120 ? `${safe.slice(0, 119)}…` : safe;
+        return safe.length > 120 ? `${safe.slice(0, 117)}...` : safe;
     }
 
     function terminalModelReference(model: { provider: string; modelId: string }) {
         const safe = safeTerminalText(`${model.provider}/${model.modelId}`) || "(unnamed model)";
-        return safe.length > 160 ? `${safe.slice(0, 159)}…` : safe;
+        return safe.length > 160 ? `${safe.slice(0, 157)}...` : safe;
     }
 
     function terminalErrorDetail(error: unknown) {
         const safe = safeTerminalText(error instanceof Error ? error.message : String(error));
         if (!safe) return "unknown error";
-        return safe.length > 500 ? `${safe.slice(0, 499)}…` : safe;
+        return safe.length > 500 ? `${safe.slice(0, 497)}...` : safe;
     }
 
     function safeTerminalText(value: string) {

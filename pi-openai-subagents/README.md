@@ -70,9 +70,11 @@ restoration and live updates.
   assignments and policies. Orchestrator mode changes the foreground prompt/loadout, not the
   delegation mechanism.
 - **Execution:** `runtime.ts` creates children through Pi's public `Agent` API and uses the host
-  model registry. `scheduler.ts` coordinates all calls against one shared workspace. Children
-  cannot delegate, activate tools or change session settings; cancellation, turn limits and
-  timeouts stop runs without automatic restarts.
+  model registry. `scheduler.ts` coordinates all calls against one shared workspace. A child may
+  execute multiple calls concurrently only when every inherited tool is classified as read; write,
+  execute and unknown-capability tools remain sequential. Children cannot delegate, activate tools
+  or change session settings; cancellation, turn limits and timeouts stop runs without automatic
+  restarts.
 - **Tool boundary:** inherited tools go through policy checks and `ctx.executeTool()`, preserving
   argument validation and all parent permission vetoes, including nested/wrapper calls. These
   checks are trust policies and scheduling discipline, **not an OS/filesystem sandbox**.
@@ -88,7 +90,9 @@ Install the workspace bundle following [the repository installation instructions
 use `/reload` or restart Pi. Do not also register a child directory as a package. For a one-session
 load after root installation, use `pi -e /path/to/pi-openai-subagents`.
 
-Sign in using `/login openai`. The existing `pi-openai-web` tools `openai_search` and `web_action`
+Sign in using `/login openai`, or manage `openai-multi` accounts with `/openai-accounts`.
+Authentication uses the session model registry, with no separate account preference or saved
+configuration change required. The existing `pi-openai-web` tools `openai_search` and `web_action`
 must be loaded and callable for web research. No separate web client, credential store or token
 handling is added. No global model settings are changed.
 
@@ -141,7 +145,15 @@ activate unavailable tools.
 ```
 
 One task is a single call; multiple tasks run as a bounded batch. Optional `context` is explicit
-task context. Optional `inputs` lists previous run/evidence IDs from this session branch. Sequence
+task context. Optional `inputs` lists previous run/evidence IDs from this session branch. Optional
+`tools` replaces that child's default tool set with an exact allowlist; it can narrow the set or
+explicitly request named callable deferred/codemode tools. Requested tools must already be callable
+in the parent and still pass the child's role policy; this never activates tools. When passing
+`inputs`, child prompts receive a compact projection rather than the full ledger objects: runtime
+telemetry is removed, tool activity is summarized, duplicate structured evidence details are
+omitted, and evidence text is capped at 12 KiB per item / 32 KiB per task. The serialized input is
+capped at 64 KiB per child with an explicit truncation marker; full records remain in
+parent-visible results. `task` and explicit `context` are not covered by those input caps. Sequence
 calls yourself; pass settled worker IDs to `reviewer`, and research/evidence IDs to
 `research-validator`. `orchestrator` is foreground-only; child agents cannot delegate. There are no
 chains, background jobs, worktrees, commits, automatic installations, rollback or separate child
@@ -149,7 +161,8 @@ artifacts.
 
 Results retain input order and contain IDs, assignments, status, structured reports, actual web
 evidence, usage and truncation metadata. Partial failures retain successes. The parent-visible
-report is capped at 50 KiB per task; complete final reports/evidence stay in result details. Child
+report is capped at 50 KiB per task; complete final reports/evidence stay in result details. Inputs
+passed to later children use the compact, bounded prompt projection described above. Child
 transcripts are not persisted. Model usage is counted once; Pi accounts for nested-tool usage
 separately.
 
@@ -165,30 +178,35 @@ visible, active runs first, with the existing call/run and overflow counts in th
 elapsed/turns, activity stage/action/tool and focus path/query/command. Long chat fields wrap using
 Pi's ANSI-aware terminal widths instead of ellipsis clipping in both collapsed and expanded views.
 Edit previews retain the existing bounded extraction (up to two old and two new +/- lines);
-wrapping may add physical lines but does not extract more content. Tool-reported success has its
-own qualification: it is not diff verification. Expanded Markdown reports remain intact. At width 0
-cards are empty; at width 1 a two-column Unicode grapheme may be clipped because it cannot fit.
-Chat adds no background color of its own; Pi's existing tool shell supplies it. The reported
-black-box appearance has not been reproduced or attributed to a verified cause. Settled rows may
-remain while another call runs; the widget disappears after the last call settles or is cancelled.
+wrapping may add physical lines but does not extract more content. Completed tool activities show
+**✓ succeeded** or **✗ failed** in their status color; pending, running and blocked stages keep
+their text labels. Tool-reported success has its own qualification: it is not diff verification.
+Expanded Markdown reports remain intact. At width 0 cards are empty; at width 1 a two-column
+Unicode grapheme may be clipped because it cannot fit. Chat adds no background color of its own;
+Pi's existing tool shell supplies it. The reported black-box appearance has not been reproduced or
+attributed to a verified cause. Settled rows may remain while another call runs; the widget
+disappears after the last call settles or is cancelled.
 
 Chat fallback rows use the label **Status**. Native-style tool titles bold shell commands and
 read/edit actions, color paths, and color read windows such as `read src/example.ts:1-2000`
-(omitted offset/limit defaults to that window). Bounded diff snippets have exactly one blank
-separator above and below in collapsed and expanded cards, without extra child margins. Shell
-output is not extracted into activity previews.
+(omitted offset/limit defaults to that window). Bounded edit/write snippets are framed by muted
+`...` lines to indicate a partial preview, with one blank separator above and no trailing child
+blank row in collapsed or expanded cards. Pi's tool shell owns the bottom padding. Shell output is
+not extracted into activity previews.
 
 One lazy, shared one-second heartbeat refreshes both the widget and live tool-result tracker,
-including quiet model waits. Elapsed execution time starts when each queued job actually begins,
-excludes queue time, and freezes at settlement. Start clocks are ephemeral, not persisted. Reload,
-session changes, shutdown, cancellation and errors clean up display ownership and heartbeat
-subscriptions. RPC/print/JSON sessions create no widget or UI timer; their event-driven partial
-snapshots still measure actual elapsed time.
+including quiet model waits. Streaming message-update snapshots coalesce at roughly 100 ms
+intervals; lifecycle/tool transitions and initial/final snapshots are immediate. Elapsed execution
+time starts when each queued job actually begins, excludes queue time, and freezes at settlement.
+Start clocks are ephemeral, not persisted. Reload, session changes, shutdown, cancellation and
+errors clean up display ownership and heartbeat subscriptions. RPC/print/JSON sessions create no
+widget or UI timer; their event-driven partial snapshots still measure actual elapsed time.
 
-The widget uses the full available width with no added left margin. Custom info/warning messages
-retain one visible left-column margin. Tool cards use Pi's existing shell margin without adding
-another. These margins and widget text sanitization are presentation-only: model-facing content,
-structured results and stored reports are unchanged.
+The widget uses the full available width with no added left margin, independent of `outputPad`.
+Custom info/warning messages honor Pi's `outputPad` setting (`0` or `1`), including changes made in
+`/settings`. Tool cards use Pi's existing shell margin without adding another. These margins and
+widget text sanitization are presentation-only: model-facing content, structured results and stored
+reports are unchanged.
 
 ## Roles and tool policies
 
@@ -203,11 +221,12 @@ structured results and stored reports are unchanged.
 - **research-validator**: independent fact-checking and grounding; capability ceiling:
   `read/search`.
 
-Specialists inherit the parent's **currently callable** loadout, then apply ceilings and allow/deny
-subsets. Deferred/codemode tools are available only when callable in Pi. Model-only orchestration
-tools are not callable by specialists. Known delegation/control tools are always blocked in
-children. Known edit/shell/control/delegation primitives cannot be disguised as reads by
-reclassification.
+By default, specialists inherit only the parent's active `direct` tools, then apply role ceilings
+and allow/deny subsets. Per-task `tools` replaces the default set with an exact allowlist; it can
+select callable `deferred`/`codemode` tools, which still pass the same role policies and parent
+execution hooks. Model-only orchestration tools are not callable by specialists. Known
+delegation/control tools are always blocked in children. Known edit/shell/control/delegation
+primitives cannot be disguised as reads by reclassification.
 
 Known Pi inspection tools, documented Lens inspection/navigation/diagnostic tools, and OpenAI
 search/page tools are classified as reads; Lens replacement/rename operations are mutations. LSP
@@ -277,11 +296,12 @@ atomically. Session state, evidence and runs use only `pi-openai-subagents-*-v1`
 
 All fields are optional. Invalid/unknown fields fail clearly. Model references must be fully
 qualified, split only at the first slash; assignments validate model existence and authentication.
-Initial default: eligible active physical `openai` model using `openai-responses`, otherwise the
-registered `openai/gpt-6.1-sol`. Missing or ineligible fallback/auth fails clearly. Other providers
-require explicit assignments. No silent fallback to an unrelated provider. Initial thinking is
-`high`; unsupported inherited/default levels normalize visibly, while explicit unsupported thinking
-commands fail.
+Initial default: eligible active physical `openai` or `openai-multi` model using
+`openai-responses`, otherwise the registered `openai/gpt-6.1-sol`. Virtual models and similarly
+named arbitrary providers are not eligible initial defaults. Missing or ineligible fallback/auth
+fails clearly. Other providers require explicit assignments. No silent fallback to an unrelated
+provider. Initial thinking is `high`; unsupported inherited/default levels normalize visibly, while
+explicit unsupported thinking commands fail.
 
 Per-field precedence: session agent → trusted project agent → user agent → effective Markdown
 definition → session shared default → project shared default → user shared default → initial
@@ -338,18 +358,22 @@ Reports contain summary, change status, changes, verification, findings, limitat
 linked verdicts, described verification and an actual successful inspection/execution tool call.
 Reported findings remain model judgments, not mechanically proven facts.
 
-Successful edits, reported changes and uncertain worker shell effects require linked review. New
-changes conservatively invalidate review coverage across the workspace. Researcher outputs and
-direct orchestrator web packets require independent linked validation. At settlement, orchestration
-requests **at most one** automatic continuation per user workflow for missing checks or
-blocking/insufficient findings. Historical negative checks are superseded only by a later completed
-independent reviewer/validator with the same target supplied through `inputs` and a successful
-matching check; blocking findings additionally require an explicit successful check against that
-report's run ID. Reviews must remain fresh, and validators must perform their own successful
-search. Unrelated, self-reported, incomplete or mixed negative reports do not clear gates; newer
-negative checks restore warnings. Remaining gaps and unsuperseded blockers produce a visible,
-model-context warning, not a loop or a false certificate. Cancellation/provider errors never
-trigger reminders. This does not hard-enforce the truth of natural-language final answers.
+Successful edits, reported changes and uncertain worker shell effects require linked review. Review
+freshness is tracked per target run: later mutations to one worker do not stale reviews of
+unrelated run IDs, while a target's own later mutation does. Every changed/uncertain worker still
+needs its own linked review. This is run-linked coverage, not a filesystem diff or a workspace-wide
+certificate; a later overlapping change needs its own review but does not automatically reopen
+earlier run IDs. Researcher outputs and direct orchestrator web packets require independent linked
+validation. At settlement, orchestration requests **at most one** automatic continuation per user
+workflow for missing checks or blocking/insufficient findings. Historical negative checks are
+superseded only by a later completed independent reviewer/validator with the same target supplied
+through `inputs` and a successful matching check; blocking findings additionally require an
+explicit successful check against that report's run ID. Reviewers must check the target's latest
+recorded revision, and validators must perform their own successful search. Unrelated,
+self-reported, incomplete or mixed negative reports do not clear gates; newer negative checks
+restore warnings. Remaining gaps and unsuperseded blockers produce a visible, model-context
+warning, not a loop or a false certificate. Cancellation/provider errors never trigger reminders.
+This does not hard-enforce the truth of natural-language final answers.
 
 ## Development and verification
 

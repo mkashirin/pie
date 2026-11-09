@@ -191,11 +191,20 @@ test("native payload is fresh, isolated, required, and evidence deduplicates", a
     assert.equal(cached.calls[0].payload.tools[0].external_web_access, false);
 });
 
-test("requires physical openai provider and Responses API before streaming", async () => {
+test("requires physical openai or openai-multi and Responses API before streaming", async () => {
+    const managed = fixture();
+    assert.equal((await run(managed, { model: { ...model, provider: "openai-multi" } })).ok, true);
+    assert.equal(managed.calls.length, 1);
     for (
-        const override of [{ provider: "custom" }, { api: "openai-codex-responses" }, {
-            api: "openai-completions",
-        }]
+        const override of [
+            { provider: "custom" },
+            { provider: "openai-multi-custom" },
+            { provider: "openai-multi", api: "pi-virtual" },
+            { api: "openai-codex-responses" },
+            {
+                api: "openai-completions",
+            },
+        ]
     ) {
         const f = fixture();
         assert.equal((await run(f, { model: { ...model, ...override } })).error.kind, "capability");
@@ -539,14 +548,14 @@ test("raw policy failures outrank generic normalized authentication failures", a
         });
         assert.equal((await run(f)).error.kind, "capability");
     }
-    assert.equal(
-        (await run(
-            fixture([], message(), {
-                throw: Object.assign(new Error("Invalid API key"), { status: 401 }),
-            }),
-        )).error.kind,
-        "auth",
+    const auth = await run(
+        fixture([], message(), {
+            throw: Object.assign(new Error("Invalid API key"), { status: 401 }),
+        }),
     );
+    assert.equal(auth.error.kind, "auth");
+    assert.match(auth.error.message, /\/login openai/);
+    assert.match(auth.error.message, /\/openai-accounts/);
 });
 
 test("raw failed usage is not overwritten by zero normalized usage", async () => {
@@ -674,7 +683,9 @@ test("aggregate integration warns when totals contain only reported usage", asyn
     const reported = await run(parserFixture(terminal));
     const packet = attachSearch(basePacket("openai_search", "fixture"), [missing, reported]);
     assert.equal(packet.status, "success");
-    assert.deepEqual(packet.usage, reported.usage);
+    // Aggregate costs contain numeric totals, not per-response provider provenance.
+    const { totalFromProvider: _provenance, ...cost } = reported.usage.cost;
+    assert.deepEqual(packet.usage, { ...reported.usage, cost });
     assert.ok(packet.warnings.some((w) => w.includes("totals include only reported usage")));
     const unknown = attachSearch(basePacket("openai_search", "fixture"), [missing]);
     assert.equal(unknown.usage, undefined);

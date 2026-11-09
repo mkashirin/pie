@@ -58,15 +58,15 @@ export class FleetComponent implements Component {
         const hidden = Math.max(0, rows.length - MAX_ROWS);
         const lines = [this.theme.fg(
             "accent",
-            `Agents · ${calls.filter((call) => call.live).length} calls · ${rows.length} runs${
-                hidden ? ` · +${hidden} more` : ""
+            `Agents | ${calls.filter((call) => call.live).length} calls | ${rows.length} runs${
+                hidden ? ` | +${hidden} more` : ""
             }`,
         )];
         rows.slice(0, MAX_ROWS).forEach((row) => {
             lines.push(compactRunLines(row, this.theme, true)[0]);
         });
         // Above-editor widgets use the full width without adding a left margin.
-        return lines.map((line) => truncateToWidth(line, width, "…"));
+        return lines.map((line) => truncateToWidth(line, width, "..."));
     }
 }
 

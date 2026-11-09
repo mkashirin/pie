@@ -96,7 +96,7 @@ export async function showPlanModeMenu(ctx: ExtensionContext, options: PlanMenuO
                             description: "Configure one-shot model and thinking choices first.",
                             to: "fresh",
                         },
-                        { id: "export", label: "Export plan…", to: "export" },
+                        { id: "export", label: "Export plan...", to: "export" },
                         { id: "save", label: "Save for later", action: "save" },
                         { id: "stay", label: "Stay in Plan mode", action: "stay" },
                         { id: "exit", label: "Discard plan and exit", action: "exit" },
@@ -216,7 +216,7 @@ export async function showReadyPlanMenu(ctx: ExtensionContext, options: ReadyPla
                         description: "Configure one-shot model and thinking choices first.",
                         to: "fresh",
                     },
-                    { id: "export", label: "Export plan…", to: "export" },
+                    { id: "export", label: "Export plan...", to: "export" },
                     { id: "save", label: "Save for later", action: "save" },
                     { id: "stay", label: "Stay in Plan mode", action: "stay" },
                     { id: "exit", label: "Discard plan and exit", action: "exit" },
@@ -328,14 +328,14 @@ function createFreshImplementationFlow(
                     label: "Start fresh implementation",
                     description: "Create the linked session and begin implementation.",
                     action: "start-fresh" as const,
-                    busyLabel: "Starting fresh implementation session…",
+                    busyLabel: "Starting fresh implementation session...",
                 },
                 {
                     id: "implementation-model",
                     label: "Model",
                     description: selectedModel?.summary
                         ?? (planModelSummary
-                            ? `${planModelSummary} · same as plan`
+                            ? `${planModelSummary} | same as plan`
                             : "Same as plan"),
                     to: "models" as const,
                 },
@@ -344,7 +344,7 @@ function createFreshImplementationFlow(
                     label: "Thinking level",
                     description: selectedThinkingLevel
                         ?? (planThinkingLevel
-                            ? `${planThinkingLevel} · same as plan`
+                            ? `${planThinkingLevel} | same as plan`
                             : "Same as plan"),
                     to: "thinking" as const,
                 },
@@ -381,7 +381,7 @@ function createFreshImplementationFlow(
                 },
                 ...IMPLEMENTATION_THINKING_LEVELS.map((level) => ({
                     id: level,
-                    label: `${level === planThinkingLevel ? "✓ " : ""}${level}`,
+                    label: `${level === planThinkingLevel ? "x " : ""}${level}`,
                     description: THINKING_LEVEL_DESCRIPTIONS[level],
                 })),
             ],
@@ -447,7 +447,7 @@ function snapshotAvailableModels(ctx: ExtensionContext): ModelChoice[] {
                 itemId: `model-${index}`,
                 model: { provider: model.provider, modelId: model.id },
                 modelInfo: model,
-                label: `${isPlanModel ? "✓ " : ""}${summary}${isPlanModel ? " · default" : ""}`,
+                label: `${isPlanModel ? "x " : ""}${summary}${isPlanModel ? " | default" : ""}`,
                 summary,
                 ...(name ? { details: [`Model Name: ${name}`] } : {}),
                 searchText: [provider, modelId, name].filter(Boolean).join(" "),

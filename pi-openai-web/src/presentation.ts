@@ -1,6 +1,7 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, visibleWidth } from "@earendil-works/pi-tui";
-import type { Packet } from "./schemas.ts";
+import { Value } from "typebox/value";
+import { type Packet, PacketSchema } from "./schemas.ts";
 
 /** Only terminal rendering sanitizes controls; returned evidence retains provider coordinates/text. */
 export function sanitizeControls(text: string): string {
@@ -96,9 +97,11 @@ export function wrapWebText(text: string, width: number): string[] {
 /** Command/status messages share the tool widgets' wrapping and sanitization policy. */
 export class WebStatus implements Component {
     private text: string;
+    private outputPad: number;
 
-    constructor(text: string) {
+    constructor(text: string, outputPad = 1) {
         this.text = text;
+        this.outputPad = outputPad;
     }
 
     invalidate() {}
@@ -106,8 +109,8 @@ export class WebStatus implements Component {
     render(width: number): string[] {
         width = Math.floor(width);
         if (!Number.isFinite(width) || width <= 0) return [];
-        // Preserve the old Text widget's one-column margins when space permits.
-        const pad = width >= 3 ? " " : "";
+        // Pi supplies transcript padding; drop margins only when content would not fit.
+        const pad = this.outputPad === 1 && width >= 3 ? " " : "";
         return wrapWebText(sanitizeControls(this.text), width - pad.length * 2)
             .map((line) => pad + line + pad);
     }
@@ -206,8 +209,11 @@ export class WebView implements Component {
     private theme: Theme;
     private expanded: boolean;
 
-    constructor(packet: Packet | undefined, fallback: string, theme: Theme, expanded: boolean) {
-        this.packet = packet;
+    constructor(packet: unknown, fallback: string, theme: Theme, expanded: boolean) {
+        // Pi-generated errors use details: {}; restored or transformed results may
+        // also lack our schema. Validate once, not during every TUI render, and
+        // preserve their text rather than treating arbitrary details as a Packet.
+        this.packet = Value.Check(PacketSchema, packet) ? packet : undefined;
         this.fallback = fallback;
         this.theme = theme;
         this.expanded = expanded;

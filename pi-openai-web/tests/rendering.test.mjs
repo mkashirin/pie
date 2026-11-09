@@ -50,6 +50,31 @@ test("calls, fallback results and command/status errors share the word-wrapping 
     assert.deepEqual(status.render(NaN), []);
 });
 
+test("status outputPad changes wrapping width without losing evidence whitespace", () => {
+    const text = "alpha beta gamma delta";
+    assert.deepEqual(new WebStatus(text, 0).render(14), ["alpha beta ", "gamma delta"]);
+    assert.deepEqual(new WebStatus(text, 1).render(14), [" alpha beta  ", " gamma delta "]);
+    for (const outputPad of [0, 1]) {
+        const status = new WebStatus("  alpha beta  界😀  ", outputPad);
+        for (const width of [1, 2, 3, 8, 14, 80]) {
+            status.invalidate();
+            const rows = status.render(width);
+            assert.ok(rows.every((line) => visibleWidth(line) <= width));
+            const unpadded = rows.map((line) =>
+                outputPad === 1 && width >= 3 ? line.slice(1, -1) : line
+            ).join("");
+            assert.equal(
+                unpadded,
+                width - (outputPad === 1 && width >= 3 ? 2 : 0) === 1
+                    ? "  alpha beta  \\u{754c}\\u{1f600}  "
+                    : "  alpha beta  界😀  ",
+            );
+        }
+        assert.deepEqual(status.render(0), []);
+        assert.deepEqual(status.render(NaN), []);
+    }
+});
+
 test("wrapping preserves long answers and URLs, links and one-column Unicode escapes", () => {
     const url = "https://example.com/" + "x".repeat(180);
     const linked = `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
@@ -90,7 +115,9 @@ test("installed theme wrapping retains every evidence space and only explicit em
     const packet = attachPage(basePacket("web_action", "fixture"), {
         ok: true,
         requestedUrl: "https://example.com/",
+        finalUrl: null,
         timestamp: new Date().toISOString(),
+        title: null,
         totalLines: 1,
         excerpts: [{ startLine: 1, endLine: 1, text: "key     value" }],
         matches: [],

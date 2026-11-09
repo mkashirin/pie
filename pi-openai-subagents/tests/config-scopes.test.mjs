@@ -106,11 +106,28 @@ test("physical OpenAI defaults fail closed; explicit provider assignments stay n
     const e = await environment(t);
     const physical = model("openai", "active");
     assert.equal(cfg.assignmentFor(e.config, {}, "worker", physical).ref, "openai/active");
+    const managed = model("openai-multi", "active");
+    assert.equal(cfg.assignmentFor(e.config, {}, "worker", managed).ref, "openai-multi/active");
+    e.ctx.model = managed;
+    e.ctx.modelRegistry.find = () => managed;
+    assert.equal(
+        (await cfg.resolveAssignment(e.config, {}, "worker", e.ctx)).ref,
+        "openai-multi/active",
+    );
+    e.ctx.modelRegistry.getApiKeyAndHeaders = async () => ({ ok: false, error: "missing auth" });
+    await assert.rejects(cfg.resolveAssignment(e.config, {}, "worker", e.ctx), /\/openai-accounts/);
     for (
-        const parent of [undefined, model("other"), { ...physical, api: "pi-virtual" }, {
-            ...physical,
-            api: "openai-completions",
-        }]
+        const parent of [
+            undefined,
+            model("other"),
+            model("openai-multi-custom"),
+            { ...managed, api: "pi-virtual" },
+            { ...physical, api: "pi-virtual" },
+            {
+                ...physical,
+                api: "openai-completions",
+            },
+        ]
     ) {
         assert.equal(cfg.assignmentFor(e.config, {}, "worker", parent).ref, "openai/gpt-6.1-sol");
     }

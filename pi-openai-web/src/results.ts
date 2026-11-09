@@ -144,7 +144,7 @@ function packetText(packet: Packet): string {
     }
     for (const evidence of packet.evidence) {
         lines.push(
-            `[${evidence.id}] ${evidence.url}${evidence.title ? ` — ${evidence.title}` : ""}`,
+            `[${evidence.id}] ${evidence.url}${evidence.title ? ` - ${evidence.title}` : ""}`,
         );
     }
     for (const result of packet.results) {

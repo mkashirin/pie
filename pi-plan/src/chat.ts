@@ -1,8 +1,15 @@
-import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import {
+    getMarkdownTheme,
+    type MessageRenderer,
+    type Theme,
+} from "@earendil-works/pi-coding-agent";
+import {
+    Box,
     type Component,
     Markdown,
+    Spacer,
     stripTerminalSequences,
+    Text,
     visibleWidth,
     wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
@@ -36,6 +43,29 @@ function contentText(result: ChatResult): string {
         .map((block) => block.text ?? "").join("\n");
 }
 
+/** Match Pi's custom-message shell, but let its render options own horizontal padding. */
+export const renderPlanMessage: MessageRenderer = (message, options, theme) => {
+    const box = new Box(options?.outputPad ?? 1, 1, (text) => theme.bg("customMessageBg", text));
+    box.addChild(
+        new Text(
+            theme.fg("customMessageLabel", theme.bold(`[${message.customType}]`)),
+            0,
+            0,
+        ),
+    );
+    box.addChild(new Spacer(1));
+    const text = typeof message.content === "string"
+        ? message.content
+        : message.content.filter((block) => block.type === "text").map((block) => block.text)
+            .join("\n");
+    box.addChild(
+        new Markdown(text, 0, 0, getMarkdownTheme(), {
+            color: (value) => theme.fg("customMessageText", value),
+        }),
+    );
+    return box;
+};
+
 /** Transcript presentation only: payloads, IDs and model-facing JSON remain unchanged. */
 export class PlanChatCard implements Component {
     private body: Markdown;
@@ -64,7 +94,7 @@ export class PlanChatCard implements Component {
             ? "muted"
             : "success";
         const heading = this.theme.fg("accent", this.theme.bold(this.title))
-            + " · " + this.theme.fg(color, this.status);
+            + " | " + this.theme.fg(color, this.status);
         return [heading, "", ...this.body.render(columns)].flatMap((line) =>
             wrapTextWithAnsi(line, columns).map((row) =>
                 // A two-cell grapheme cannot fit a one-column terminal. Never slice it or add dots.
@@ -87,12 +117,12 @@ export function renderPlanQuestionCall(args: unknown, theme: Theme) {
                     const option = record(value);
                     const description = prose(option.description);
                     return `${optionIndex + 1}. **${prose(option.label)}**`
-                        + (description ? ` — ${description}` : "");
+                        + (description ? ` - ${description}` : "");
                 }).join("\n"),
             ].filter(Boolean).join("\n\n");
         }).join("\n\n")
         : "_Preparing questions._";
-    return new PlanChatCard("Plan · Questions", body, theme, "waiting");
+    return new PlanChatCard("Plan | Questions", body, theme, "waiting");
 }
 
 export function renderPlanQuestionResult(
@@ -110,7 +140,7 @@ export function renderPlanQuestionResult(
     const details = { ...payload, ...record(result.details) };
     if (details.cancelled === true) {
         const message = prose(details.message) || prose(details.reason) || "Question cancelled.";
-        return new PlanChatCard("Plan · Questions", message, theme, "cancelled");
+        return new PlanChatCard("Plan | Questions", message, theme, "cancelled");
     }
     if (Array.isArray(details.answers)) {
         const body = details.answers.map((value, index) => {
@@ -127,7 +157,7 @@ export function renderPlanQuestionResult(
                     : []),
             ].filter(Boolean).join("\n\n");
         }).join("\n\n");
-        return new PlanChatCard("Plan · Answers", body, theme, "answered");
+        return new PlanChatCard("Plan | Answers", body, theme, "answered");
     }
     const body = options.isPartial
         ? "_Waiting for answers._"
@@ -135,7 +165,7 @@ export function renderPlanQuestionResult(
         ? "_No answers available._"
         : prose(text);
     return new PlanChatCard(
-        "Plan · Questions",
+        "Plan | Questions",
         body,
         theme,
         options.isPartial ? "waiting" : "error",

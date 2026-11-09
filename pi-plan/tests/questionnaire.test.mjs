@@ -23,7 +23,7 @@ const texts = (frame) => frame.map(plain);
 function optionRows(frame) {
     const rows = texts(frame);
     return rows.slice(
-        rows.findIndex((line) => line.includes("→ 1.")),
+        rows.findIndex((line) => line.includes("> 1.")),
         rows.findIndex((line) => line.startsWith("   2.")),
     );
 }
@@ -42,9 +42,9 @@ test(
     async () => {
         const { tui, running } = await open();
         assert.deepEqual(optionRows(tui.render()), [
-            " → 1. Keep ordinary",
+            " > 1. Keep ordinary",
             "      words together",
-            "      while choosing —",
+            "      while choosing -",
             "      Helpful details",
             "      remain readable",
         ]);
@@ -80,9 +80,9 @@ test(
         }, { isCurrent: () => true, isEnabled: () => true });
         await tui.waitForOpen();
         assert.deepEqual(optionRows(tui.render()), [
-            " → 1. Keep ordinary",
+            " > 1. Keep ordinary",
             "      words together",
-            "      while choosing —",
+            "      while choosing -",
             "      Helpful details",
             "      remain readable",
         ]);
@@ -112,7 +112,7 @@ test(
                 questions: [{ ...question, options: [{ label: token + " next" }] }],
             }, { width: 20 });
             const rows = texts(tui.render());
-            assert.ok(rows.some((line) => line.includes("…")), rows.join("\n"));
+            assert.ok(rows.some((line) => line.includes("...")), rows.join("\n"));
             assert.ok(rows.includes("      next"));
             for (const width of [1, 2, 3, 4, 5, 6, 8, 12, 20, 40, 100]) {
                 const frame = tui.resize({ width });

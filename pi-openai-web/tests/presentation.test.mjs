@@ -197,6 +197,52 @@ test("expanded evidence and collapsed warnings use word boundaries and do not mu
     }
 });
 
+test("invalid or legacy details fall back to text in both display modes", () => {
+    const missingTruncation = searchPacket();
+    delete missingTruncation.truncation;
+    const invalidQuery = searchPacket();
+    delete invalidQuery.results[0].truncation;
+    const invalidSegment = searchPacket();
+    invalidSegment.results[0].answerSegments = [null];
+    const invalidPage = pagePacket();
+    delete invalidPage.page.truncation;
+    const invalidExcerpt = pagePacket();
+    invalidExcerpt.page.excerpts[0].text = null;
+    const invalidWarning = searchPacket();
+    invalidWarning.warnings = [null];
+    const unsupportedVersion = searchPacket();
+    unsupportedVersion.version = 2;
+
+    for (
+        const details of [
+            undefined,
+            null,
+            {}, // Pi-generated errors have truthy, empty details.
+            "legacy details",
+            [],
+            missingTruncation,
+            invalidQuery,
+            invalidSegment,
+            invalidPage,
+            invalidExcerpt,
+            invalidWarning,
+            unsupportedVersion,
+        ]
+    ) {
+        const before = structuredClone(details);
+        for (const expanded of [false, true]) {
+            const view = new WebView(details, "Request failed\x07\u202e", theme, expanded);
+            assert.deepEqual(view.render(80), ["", "Request failed"]);
+            assert.deepEqual(view.render(0), []);
+            for (const width of [1, 8]) {
+                assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
+            }
+            assert.deepEqual(new WebView(details, "", theme, expanded).render(80), []);
+        }
+        assert.deepEqual(details, before);
+    }
+});
+
 test("fallback controls and Unicode width are sanitized without requiring UI", () => {
     const view = new WebView(undefined, "界😀\x1b[31m\x07\u2066\nnext\tline", theme, false);
     for (const width of [1, 2, 8]) {

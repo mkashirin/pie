@@ -75,7 +75,7 @@ test("default/null/invalid read windows remain bounded, complete and presentatio
     }
 });
 
-test("installed tool shell keeps exactly one blank around bounded diffs in both expansion modes", () => {
+test("installed tool shell frames bounded diffs without redundant bottom padding in both expansion modes", () => {
     initTheme("dark");
     const theme = getThemeByName("dark");
     const run = row(activity.activityPreview("worker", "edit", {
@@ -99,16 +99,20 @@ test("installed tool shell keeps exactly one blank around bounded diffs in both 
             const plain = lines.map((line) => stripTerminalSequences(line).trim());
             for (let i = 0; i < plain.length; i++) {
                 if (plain[i] === "- OLD") {
-                    assert.equal(plain[i - 1], "");
-                    assert.notEqual(plain[i - 2], "");
+                    assert.equal(plain[i - 1], "...");
+                    assert.equal(plain[i - 2], "");
+                    assert.notEqual(plain[i - 3], "");
                 }
                 if (plain[i] === "+ SECOND") {
-                    assert.equal(plain[i + 1], "");
-                    // The default host Box owns its final padding row (not a child margin).
-                    if (i + 2 < plain.length - 1) assert.notEqual(plain[i + 2], "");
+                    assert.equal(plain[i + 1], "...");
+                    assert.equal(plain[i + 2], "");
+                    // Only the host padding or one separator between cards follows the frame.
+                    if (i + 3 < plain.length) assert.notEqual(plain[i + 3], "");
                 }
             }
             assert.equal(plain.filter((line) => line === "- OLD").length, 2);
+            assert.equal(plain.filter((line) => line === "...").length, 4);
+            assert.deepEqual(plain.slice(-2), ["...", ""]);
             assert.doesNotMatch(plain.join("\n"), /OMITTED/);
         }
     }

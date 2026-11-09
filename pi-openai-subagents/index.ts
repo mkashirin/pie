@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { Type } from "@earendil-works/pi-ai";
+import { Type } from "typebox";
 import {
     defineTool,
     type ExtensionAPI,
@@ -387,7 +387,7 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
         label: "Subagents",
         exposure: "model-only",
         description:
-            "Run isolated specialists using inherited parent tools and role policies. One task is a single run; multiple tasks form a bounded parallel batch. Sequence calls yourself. Parallel workers need disjoint writePaths; supply prior run/evidence IDs in inputs for review/validation. No recursion, background work or tool activation.",
+            "Run isolated specialists with role policies. By default, children inherit active direct parent tools; task.tools replaces that set with an exact allowlist and can include callable deferred/codemode tools by name. One task is a single run; multiple tasks form a bounded parallel batch. Sequence calls yourself. Parallel workers need disjoint writePaths; supply prior run/evidence IDs in inputs for review/validation. No recursion, background work or tool activation.",
         promptSnippet:
             "subagents_run: delegate scoped specialist tasks with isolated model contexts.",
         parameters: RunSchema,
@@ -475,8 +475,8 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
                         Array.isArray(args?.tasks)
                             ? args.tasks.flatMap((t) =>
                                 typeof t?.agent === "string" ? [compactText(t.agent)] : []
-                            ).join(", ") || "…"
-                            : "…"
+                            ).join(", ") || "..."
+                            : "..."
                     }`,
                 ),
                 0,
@@ -508,12 +508,12 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
     ) {
         pi.registerMessageRenderer(
             type,
-            (message) =>
+            (message, options) =>
                 new Text(
                     typeof message.content === "string"
                         ? message.content
                         : JSON.stringify(message.content),
-                    1,
+                    options?.outputPad ?? 1,
                     0,
                 ),
         );

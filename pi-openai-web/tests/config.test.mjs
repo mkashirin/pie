@@ -69,6 +69,23 @@ test("explicit invalid model never falls back; status uses only synchronous auth
         () => resolveModel(defaults, { ...ctx, model: { ...model, provider: "openai-codex" } }),
         /physical/,
     );
+    for (const provider of ["openai", "openai-multi"]) {
+        const selected = { ...model, provider };
+        assert.deepEqual(resolveModel(defaults, { ...ctx, model: selected }), selected);
+        assert.deepEqual(
+            resolveModel({ ...defaults, model: `${provider}/fixture` }, {
+                ...ctx,
+                modelRegistry: { find: () => selected },
+            }),
+            selected,
+        );
+    }
+    for (const override of [{ provider: "openai-multi-custom" }, { api: "pi-virtual" }]) {
+        assert.throws(
+            () => resolveModel(defaults, { ...ctx, model: { ...model, ...override } }),
+            /physical/,
+        );
+    }
     assert.notEqual(resolveModel(defaults, ctx), model);
     assert.match(
         status({ settings: defaults, provenance: {}, trusted: false }, ctx),

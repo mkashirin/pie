@@ -466,7 +466,7 @@ export async function showPlanModeSettings(
 
 function settingsLines(settingsPath: string, notice: string | undefined) {
     return [
-        `User settings · ${safeTerminalText(settingsPath)}`,
+        `User settings | ${safeTerminalText(settingsPath)}`,
         "Plan defaults apply to the next workflow; reinjection and "
         + "export choices apply to their next action.",
         ...(notice ? [safeTerminalText(notice)] : []),
@@ -476,7 +476,7 @@ function settingsLines(settingsPath: string, notice: string | undefined) {
 function invalidScreen(settingsPath: string, state: SettingsMenuState) {
     return {
         kind: "detail" as const,
-        title: "Plan Mode Settings · Read only",
+        title: "Plan Mode Settings | Read only",
         lines: [
             `Invalid settings file. Fix ${safeTerminalText(settingsPath)} before saving.`,
             safeTerminalText(state.reason ?? "The settings file is invalid."),
@@ -498,7 +498,7 @@ function implementationModelValue(
     if (!configured) return "same as plan";
     return findAvailableImplementationModel(models, configured)
         ? safeModelReference(configured)
-        : `same as plan · ${safeModelReference(configured)} unavailable`;
+        : `same as plan | ${safeModelReference(configured)} unavailable`;
 }
 
 function implementationModelItems(
@@ -571,7 +571,7 @@ function defaultToolItems(
         return {
             id: toolItemIds.get(tool.name) as string,
             label: tool.name,
-            description: `${policy} · ${description}`,
+            description: `${policy} | ${description}`,
             searchText: `${policy} ${description}`,
             selected: selected.has(tool.name),
             disabled: !selectable,
@@ -590,7 +590,7 @@ function defaultToolItems(
         items.push({
             id: `plan-settings-pending:${index}`,
             label,
-            description: "pending registration · Retained and resolved before the first request",
+            description: "pending registration | Retained and resolved before the first request",
             searchText: `${label} pending registration retained settings first request`,
             selected: true,
             disabled: true,
@@ -608,7 +608,7 @@ function explicitToolNames(tools: readonly ToolInfo[], configured: string[] | un
 
 function terminalToolName(value: string) {
     const safe = safeTerminalText(value) || "(unnamed tool)";
-    return safe.length > 120 ? `${safe.slice(0, 119)}…` : safe;
+    return safe.length > 120 ? `${safe.slice(0, 117)}...` : safe;
 }
 
 function safeTerminalText(value: string) {

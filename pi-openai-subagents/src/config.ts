@@ -280,7 +280,8 @@ function eligibleDefault(model: Model<Api>): boolean {
         isVirtualModel?: (model: { api: string }) => boolean;
     }).isVirtualModel;
     const virtual = helper ? helper(model) : model.api === "pi-virtual";
-    return !virtual && model.provider === "openai" && model.api === "openai-responses";
+    return !virtual && ["openai", "openai-multi"].includes(model.provider)
+        && model.api === "openai-responses";
 }
 
 export function assignmentFor(
@@ -321,11 +322,16 @@ export async function resolveAssignment(
     }
     if (selected.modelSource === "initial default" && !eligibleDefault(model)) {
         throw new Error(
-            `Default model ${selected.ref} must be a physical openai/openai-responses model. Choose one with /subagents model default openai/model-id --save.`,
+            `Default model ${selected.ref} must be a physical openai or openai-multi model using openai-responses. Choose one with /subagents model default provider/model-id.`,
         );
     }
     const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    if (!auth.ok) throw new Error(`Model ${selected.ref}: ${auth.error}. Use /login ${provider}.`);
+    if (!auth.ok) {
+        const guidance = provider === "openai-multi"
+            ? "Use /openai-accounts to manage OpenAI accounts."
+            : `Use /login ${provider}.`;
+        throw new Error(`Model ${selected.ref}: ${auth.error}. ${guidance}`);
+    }
     const supported = supportedThinking(model);
     const requested = selected.thinking;
     const thinking = supported.includes(requested)
@@ -342,7 +348,7 @@ export async function resolveAssignment(
         model,
         thinking,
         normalization: thinking !== requested
-            ? `${requested} → ${thinking} for ${selected.ref}`
+            ? `${requested} > ${thinking} for ${selected.ref}`
             : undefined,
     };
 }

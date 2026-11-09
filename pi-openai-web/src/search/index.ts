@@ -100,7 +100,10 @@ function classify(
     else if (
         typeof status === "number" && status >= 400 || /\b[45]\d\d\b|http.*error/i.test(text)
     ) kind = "http";
-    return { kind, message: clip(message, 2048) };
+    const guidance = kind === "auth"
+        ? " Sign in with /login openai; for managed openai-multi accounts use /openai-accounts."
+        : "";
+    return { kind, message: clip(message, 2048 - guidance.length) + guidance };
 }
 
 class Evidence {
@@ -523,11 +526,13 @@ export async function searchQuery(options: SearchQueryOptions): Promise<SearchQu
             !["live", "cached"].includes(freshness)
             || !["low", "medium", "high"].includes(searchContextSize)
         ) error = { kind: "capability", message: "Unsupported freshness or search context size." };
-        else if (model.provider !== "openai" || model.api !== "openai-responses") {
+        else if (
+            !["openai", "openai-multi"].includes(model.provider) || model.api !== "openai-responses"
+        ) {
             error = {
                 kind: "capability",
                 message:
-                    "Native search requires physical provider openai and API openai-responses.",
+                    "Native search requires physical provider openai or openai-multi and API openai-responses.",
             };
         } else {
             const stream = registry.streamSimple(model, {

@@ -220,7 +220,7 @@ export class QuestionnaireComponent {
         const optionCount = this.options.questions[this.page].options.length
             + Number(this.options.allowCustomAnswer);
         return [
-            rawKeyHint(theme, optionCount === 1 ? "1" : `1–${optionCount}`, "answer"),
+            rawKeyHint(theme, optionCount === 1 ? "1" : `1-${optionCount}`, "answer"),
             rawKeyHint(theme, selectionNavigationKeys(keybindings), "navigate"),
             keybindingHint(
                 theme,
@@ -256,7 +256,7 @@ export class QuestionnaireComponent {
                 return [];
             }
             const header = sanitizeQuestionnaireText(question.header) || "Question 1";
-            return [this.options.theme.fg("muted", truncateToWidth(header, width, "…"))];
+            return [this.options.theme.fg("muted", truncateToWidth(header, width, "..."))];
         }
         return this.renderTabs(width);
     }
@@ -266,7 +266,7 @@ export class QuestionnaireComponent {
         const tabs = [
             ...this.options.questions.map((question, index) => {
                 const label = sanitizeQuestionnaireText(question.header) || `Question ${index + 1}`;
-                const answered = this.answers[index] ? "✓ " : "";
+                const answered = this.answers[index] ? "x " : "";
                 return this.page === index ? `[${answered}${label}]` : `${answered}${label}`;
             }),
             ...(this.hasReviewPage() ? [this.isReviewPage() ? `[${reviewTab}]` : reviewTab] : []),
@@ -274,7 +274,7 @@ export class QuestionnaireComponent {
         const lines = [];
         let line = "";
         for (const tab of tabs) {
-            const boundedTab = truncateToWidth(tab, width, "…");
+            const boundedTab = truncateToWidth(tab, width, "...");
             const candidate = line ? `${line}  ${boundedTab}` : boundedTab;
             if (line && visibleWidth(candidate) > width) {
                 lines.push(this.options.theme.fg("accent", line));
@@ -304,16 +304,16 @@ export class QuestionnaireComponent {
         lines.push("");
         question.options.forEach((option, index) => {
             const selected = this.selectedOptions[this.page] === index;
-            const cursor = selected ? "→" : " ";
+            const cursor = selected ? ">" : " ";
             const label = `${cursor} ${index + 1}. ${sanitizeQuestionnaireText(option.label)}`;
             const chosen = this.answers[this.page]?.optionIndex === index + 1;
             const description = option.description
-                ? ` — ${sanitizeQuestionnaireText(option.description)}`
+                ? ` - ${sanitizeQuestionnaireText(option.description)}`
                 : "";
             const line = selected
-                ? this.options.theme.fg("accent", `${label}${chosen ? " ✓" : ""}${description}`)
+                ? this.options.theme.fg("accent", `${label}${chosen ? " x" : ""}${description}`)
                 : `${this.options.theme.fg("text", label)}${
-                    chosen ? this.options.theme.fg("success", " ✓") : ""
+                    chosen ? this.options.theme.fg("success", " x") : ""
                 }${description ? this.options.theme.fg("muted", description) : ""}`;
             lines.push(
                 ...hardWrapWithIndent(line, width, visibleWidth(`${cursor} ${index + 1}. `)),
@@ -353,15 +353,15 @@ export class QuestionnaireComponent {
     renderCustomOption(question, width) {
         const customIndex = question.options.length;
         const selected = this.selectedOptions[this.page] === customIndex;
-        const cursor = selected ? "→" : " ";
+        const cursor = selected ? ">" : " ";
         const label = `${cursor} ${customIndex + 1}. ${
             sanitizeQuestionnaireText(this.options.labels.otherOption)
         }`;
         const chosen = this.answers[this.page]?.wasCustom === true;
         const line = selected
-            ? this.options.theme.fg("accent", `${label}${chosen ? " ✓" : ""}`)
+            ? this.options.theme.fg("accent", `${label}${chosen ? " x" : ""}`)
             : `${this.options.theme.fg("text", label)}${
-                chosen ? this.options.theme.fg("success", " ✓") : ""
+                chosen ? this.options.theme.fg("success", " x") : ""
             }`;
         return hardWrapWithIndent(line, width, visibleWidth(`${cursor} ${customIndex + 1}. `));
     }
@@ -381,8 +381,8 @@ export class QuestionnaireComponent {
             const answer = this.answers[index];
             const header = sanitizeQuestionnaireText(question.header) || `Question ${index + 1}`;
             const label = `${index + 1}. ${header}`;
-            const summary = ` — ${inlineSummary(answer?.answer ?? "Unanswered")}${
-                answer?.note ? ` · ${noteLabel}: ${inlineSummary(answer.note)}` : ""
+            const summary = ` - ${inlineSummary(answer?.answer ?? "Unanswered")}${
+                answer?.note ? ` | ${noteLabel}: ${inlineSummary(answer.note)}` : ""
             }`;
             const line = `${this.options.theme.fg("text", label)}${
                 this.options.theme.fg("muted", summary)
@@ -767,7 +767,7 @@ function selectionNavigationKeys(keybindings) {
     const down = keybindings.getKeys("tui.select.down");
     if (up.includes("up") && down.includes("down")) {
         return formatHintKeys([
-            "↑↓",
+            "^v",
             ...up.filter((key) => key !== "up"),
             ...down.filter((key) => key !== "down"),
         ]);
@@ -790,11 +790,11 @@ function questionNavigationKeys(keybindings) {
         keys.push("shift+tab");
     }
     if (left && right) {
-        keys.push("←→");
+        keys.push("<>");
     } else if (left) {
-        keys.push("←");
+        keys.push("<");
     } else if (right) {
-        keys.push("→");
+        keys.push(">");
     }
     return formatHintKeys(keys);
 }
@@ -823,7 +823,7 @@ function formatHintKey(key) {
 }
 
 function inlineSummary(value) {
-    return value.split("\n").map(sanitizeQuestionnaireText).join(" ↵ ");
+    return value.split("\n").map(sanitizeQuestionnaireText).join(" / ");
 }
 
 function labeledRaw(label, value, width, theme) {
@@ -867,7 +867,7 @@ function hardWrapWithIndent(value, width, indent) {
     const safeWidth = Math.max(1, Math.floor(width));
     const safeIndent = Math.max(0, Math.floor(indent));
     if (safeIndent >= safeWidth) {
-        return [truncateToWidth(value, safeWidth, "…")];
+        return [truncateToWidth(value, safeWidth, "...")];
     }
     const contentWidth = safeWidth - safeIndent;
     const prefix = sliceByColumn(value, 0, safeIndent, true);
@@ -885,7 +885,7 @@ function hardWrapWithIndent(value, width, indent) {
         const word = truncateToWidth(
             sliceByColumn(value, column, wordWidth, true),
             contentWidth,
-            "…",
+            "...",
         );
         const boundedWidth = visibleWidth(word);
         if (lineWidth && lineWidth + 1 + boundedWidth > contentWidth) {

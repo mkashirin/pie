@@ -2,19 +2,29 @@
     "name": "pi-local-extensions",
     "version": "0.1.0",
     "private": true,
-    "description": "Portable Pi extension bundle: Helix editor, OpenAI subagents, web tools and Plan Mode",
+    "description": "Portable Pi extension bundle: Helix editor, OpenAI subagents, multi-account routing, web tools, LSP tools and Plan Mode",
     "keywords": [
         "pi-package"
     ],
     "license": "MIT",
     "type": "module",
-    "workspaces": ["pi-hem", "pi-openai-subagents", "pi-openai-web", "pi-plan"],
+    "workspaces": [
+        "pi-hem",
+        "pi-openai-subagents",
+        "pi-openai-multi",
+        "pi-openai-web",
+        "pi-plan",
+        "pi-lsp"
+    ],
     "scripts": {
+        "check:lsp": "npm run check --workspace pi-lsp",
+        "smoke:lsp": "npm run smoke --workspace pi-lsp",
         "setup:dev": "npm ci --include=dev --legacy-peer-deps",
         "format": "dprint fmt && npm run format --workspaces",
         "format:check": "dprint check && npm run format:check --workspaces",
         "typecheck": "npm run typecheck --workspaces",
         "test": "node --test tests/*.test.mjs",
+        "audit:ui": "node scripts/ui-symbols.mjs",
         "smoke": "node scripts/smoke.mjs",
         "check": "dprint check && npm test && npm run check --workspaces"
     },
@@ -24,10 +34,11 @@
         "ipaddr.js": "2.2.0"
     },
     "devDependencies": {
-        "@earendil-works/pi-agent-core": "1.0.0",
-        "@earendil-works/pi-ai": "1.0.0",
-        "@earendil-works/pi-coding-agent": "1.0.0",
-        "@earendil-works/pi-tui": "1.0.0",
+        "@earendil-works/pi-agent-core": "1.5.0",
+        "@earendil-works/pi-ai": "1.5.0",
+        "@earendil-works/pi-coding-agent": "1.5.0",
+        "@earendil-works/pi-tui": "1.5.0",
+        "@types/cross-spawn": "^6.0.6",
         "@types/node": "^22.19.0",
         "dprint": "^0.58.0",
         "jiti": "^2.6.0",
@@ -48,8 +59,11 @@
         "extensions": [
             "./pi-hem/index.ts",
             "./pi-openai-subagents/index.ts",
+            "./pi-openai-multi/index.ts",
             "./pi-openai-web/index.ts",
-            "./pi-plan/index.ts"
-        ]
+            "./pi-plan/index.ts",
+            "./pi-lsp/index.ts"
+        ],
+        "skills": ["./skills"]
     }
 }

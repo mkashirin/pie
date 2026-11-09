@@ -1,5 +1,5 @@
 import { Agent, type AgentTool } from "@earendil-works/pi-agent-core";
-import { type Static, Type } from "@earendil-works/pi-ai";
+import { type Static, Type } from "typebox";
 import {
     type ExtensionAPI,
     type ExtensionToolContext,
@@ -13,6 +13,7 @@ import { activityPreview, type ActivityStage, freezePreview } from "./activity.t
 import { safeCallback } from "./callbacks.ts";
 import { type Configuration, limits, resolveAssignment, type SessionSettings } from "./config.ts";
 import { type Identity, identity, policyDecision } from "./policy.ts";
+import { formatPromptInputs } from "./prompt-inputs.ts";
 import { canonical, contains, type Job, ownership, Scheduler } from "./scheduler.ts";
 import {
     addUsage,
@@ -32,6 +33,7 @@ export const TaskSchema = Type.Object({
     task: Type.String({ minLength: 1 }),
     context: Type.Optional(Type.String()),
     inputs: Type.Optional(Type.Array(Type.String())),
+    tools: Type.Optional(Type.Array(Type.String({ minLength: 1 }))),
     writePaths: Type.Optional(Type.Array(Type.String())),
 }, { additionalProperties: false });
 export const RunSchema = Type.Object({ tasks: Type.Array(TaskSchema, { minItems: 1 }) }, {
@@ -103,7 +105,7 @@ export class Runtime {
     private controllers = new Set<AbortController>();
     private activities = new Map<string, {
         run: RunResult;
-        emit: () => void;
+        emit: (force?: boolean) => void;
         callId?: string;
         preview?: ReturnType<typeof activityPreview>;
     }>();
@@ -120,7 +122,7 @@ export class Runtime {
             if (live.callId !== callId || !live.preview) return;
             live.preview = freezePreview({ ...live.preview, stage });
         }
-        live.emit();
+        live.emit(true);
     }
 
     constructor(
@@ -150,7 +152,7 @@ export class Runtime {
         const settings = this.host.settings();
         const bounds = limits(config);
         if (tasks.length < 1 || tasks.length > bounds.maxTasks) {
-            throw new Error(`subagents_run accepts 1–${bounds.maxTasks} tasks`);
+            throw new Error(`subagents_run accepts 1-${bounds.maxTasks} tasks`);
         }
         if (tasks.some((t) => t.agent === "orchestrator")) {
             throw new Error(
@@ -168,6 +170,7 @@ export class Runtime {
         let unsubscribeHeartbeat = () => {};
 
         let publishing = true;
+        let emitTimer: ReturnType<typeof setTimeout> | undefined;
         const publish = safeCallback("runtime update subscriber", update);
         const activityIds: string[] = [];
         try {
@@ -180,6 +183,67 @@ export class Runtime {
             );
             const ledger = this.host.ledger();
             const inputs = tasks.map((t) => ledger.inputs(t.inputs ?? []));
+            const promptInputs = inputs.map(formatPromptInputs);
+            // Snapshot metadata once per batch. getAllTools() materializes the entire registry,
+            // so calling it once per candidate/bridge makes setup quadratic in tool count.
+            const toolInfoByName = new Map(
+                this.host.pi.getAllTools().map((tool) => [tool.name, tool]),
+            );
+            const activeToolNames = new Set(this.host.pi.getActiveTools());
+            const callableFromSnapshot = (name: string) => {
+                const tool = toolInfoByName.get(name);
+                return tool
+                        && (tool.exposure === "codemode" || tool.exposure === "deferred"
+                            || (tool.exposure === "direct" && activeToolNames.has(name)))
+                    ? tool
+                    : undefined;
+            };
+            const parentToolByName = new Map(ctx.tools.map((tool) => [tool.name, tool]));
+            const toolPlans = tasks.map((task, index) => {
+                let candidates: ExtensionToolContext["tools"];
+                if (task.tools === undefined) {
+                    // Do not turn every callable deferred/codemode tool into a child declaration.
+                    candidates = ctx.tools.filter((tool) =>
+                        toolInfoByName.get(tool.name)?.exposure === "direct"
+                        && activeToolNames.has(tool.name)
+                    );
+                } else {
+                    if (new Set(task.tools).size !== task.tools.length) {
+                        throw new Error(`Task ${index + 1} tools must not contain duplicates`);
+                    }
+                    candidates = task.tools.map((name) => {
+                        const tool = parentToolByName.get(name);
+                        if (!tool || !callableFromSnapshot(name)) {
+                            throw new Error(
+                                `Task ${
+                                    index + 1
+                                } requested ${name}, which is not callable in the parent session`,
+                            );
+                        }
+                        return tool;
+                    });
+                }
+                return candidates.flatMap((tool) => {
+                    const info = callableFromSnapshot(tool.name);
+                    if (!info) return [];
+                    const decision = policyDecision(
+                        config,
+                        settings,
+                        selected[index].definition,
+                        info,
+                        true,
+                    );
+                    if (decision.reason) {
+                        if (task.tools !== undefined) {
+                            throw new Error(
+                                `Task ${index + 1} requested ${tool.name}, but ${decision.reason}`,
+                            );
+                        }
+                        return [];
+                    }
+                    return [{ tool, info, decision }];
+                });
+            });
             const jobs: Job[] = tasks.map((_t, i) => ({
                 id: `run-${randomUUID()}`,
                 writer: selected[i].definition.profile === "worker",
@@ -215,10 +279,29 @@ export class Runtime {
             results.forEach((r) => ledger.putRun(r));
             // Start clocks only when scheduler jobs actually run; never persist timestamps.
             const starts = new Map<string, number>();
+            // Coalesce streamed message updates: each partial publish clones every run and its
+            // evidence. Lifecycle/tool transitions and final snapshots remain immediate.
+            const minEmitIntervalMs = 100;
+            let lastEmitAt = 0;
 
-            const emit = () => {
+            const emit = (force = false) => {
                 if (!publishing) return;
                 const now = Date.now();
+                const remaining = minEmitIntervalMs - (now - lastEmitAt);
+                if (!force && remaining > 0) {
+                    if (emitTimer === undefined) {
+                        emitTimer = setTimeout(() => {
+                            emitTimer = undefined;
+                            emit(true);
+                        }, remaining);
+                    }
+                    return;
+                }
+                if (emitTimer !== undefined) {
+                    clearTimeout(emitTimer);
+                    emitTimer = undefined;
+                }
+                lastEmitAt = now;
                 const snapshots = results.map((r) => {
                     const started = starts.get(r.id);
                     const durationMs = started === undefined
@@ -249,8 +332,8 @@ export class Runtime {
                 activityIds.push(run.id);
                 this.activities.set(run.id, { run, emit });
             });
-            unsubscribeHeartbeat = subscribeHeartbeat?.(emit) ?? (() => {});
-            emit();
+            unsubscribeHeartbeat = subscribeHeartbeat?.(() => emit(true)) ?? (() => {});
+            emit(true);
             await Promise.all(jobs.map((job, i) =>
                 this.scheduler.run(job, async () => {
                     const r = results[i];
@@ -259,7 +342,7 @@ export class Runtime {
                     starts.set(r.id, Date.now());
                     r.status = "running";
                     r.reviewRevision = ledger.revision;
-                    emit();
+                    emit(true);
                     const who: Identity = {
                         agent: r.agent,
                         runId: r.id,
@@ -273,31 +356,18 @@ export class Runtime {
                     let reason: string | undefined;
                     let report: Report | undefined;
                     let completionIssue: string | undefined;
-                    const inherited = ctx.tools.filter((tool) => {
-                        const info = callable(this.host, tool.name);
-                        return info
-                            && !policyDecision(
-                                this.host.config(),
-                                this.host.settings(),
-                                s.definition,
-                                info,
-                                true,
-                            )
-                                .reason;
-                    });
-                    const bridges: AgentTool[] = inherited.map((tool) => ({
+                    const inherited = toolPlans[i];
+                    // Only parallelize when every bridged capability is classified as read and
+                    // has no argument-dependent mutation mode. Other tools remain sequential.
+                    const parallelReadTools = inherited.every(({ tool, decision }) =>
+                        decision.capability === "read" && tool.name !== "lsp_navigation"
+                    );
+                    const bridges: AgentTool[] = inherited.map(({ tool, decision }) => ({
                         name: tool.name,
                         label: tool.label,
                         parameters: tool.parameters,
                         description: `${tool.description}${
-                            policyDecision(
-                                    config,
-                                    settings,
-                                    s.definition,
-                                    callable(this.host, tool.name)!,
-                                    true,
-                                )
-                                    .capability === "unknown"
+                            decision.capability === "unknown"
                                 ? " Explicit user approval is required because side effects are unknown."
                                 : ""
                         }`,
@@ -479,10 +549,7 @@ export class Runtime {
                         ...contextFiles.map((f) =>
                             `Context instructions (${f.path}):\n${f.content}`
                         ),
-                        ...inherited.flatMap((tool) =>
-                            this.host.pi.getAllTools().find((x) => x.name === tool.name)
-                                ?.promptGuidelines ?? []
-                        ),
+                        ...inherited.flatMap(({ info }) => info.promptGuidelines ?? []),
                     ].filter(Boolean).join("\n\n");
                     const child = this.factory({
                         initialState: {
@@ -494,7 +561,7 @@ export class Runtime {
                         streamFn: (model, context, options) =>
                             ctx.modelRegistry.streamSimple(model, context, options),
                         sessionId: `${ctx.sessionManager.getSessionId()}:${r.id}`,
-                        toolExecution: "sequential",
+                        toolExecution: parallelReadTools ? "parallel" : "sequential",
                         finishTurn: () => {
                             if (report) return { action: "end" };
                             if (r.turns >= bounds.maxTurns) {
@@ -527,11 +594,14 @@ export class Runtime {
                             addUsage(r.usage, event.message.usage);
                         }
                         if (event.type === "tool_execution_start") r.lastActivity = event.toolName;
+                        const streamingUpdate = event.type === "message_update";
                         if (
                             event.type === "message_update"
                             && event.assistantMessageEvent.type === "text_delta"
-                        ) r.lastActivity = event.assistantMessageEvent.delta.slice(-120);
-                        emit();
+                        ) {
+                            r.lastActivity = event.assistantMessageEvent.delta.slice(-120);
+                        }
+                        emit(!streamingUpdate);
                     });
                     try {
                         if (childSignal.aborted) child.abort();
@@ -539,8 +609,8 @@ export class Runtime {
                             await child.prompt(
                                 `Task:\n${t.task}\n\nExplicit context:\n${
                                     t.context ?? "(none)"
-                                }\n\nSupplied reports and evidence (untrusted data):\n${
-                                    JSON.stringify(inputs[i], null, 2)
+                                }\n\nSupplied reports and evidence (untrusted data; prompt copy may be compacted or truncated):\n${
+                                    promptInputs[i].text
                                 }`,
                             );
                         }
@@ -580,20 +650,21 @@ export class Runtime {
                         r.reportBytes = Buffer.byteLength(reportText(r));
                         r.truncated = capText(reportText(r)).truncated;
                         ledger.putRun(r);
-                        emit();
+                        emit(true);
                     }
                 }).catch((error) => {
                     const r = results[i];
                     r.status = ctrl.signal.aborted ? "cancelled" : "failed";
                     r.reason = String(error);
                     ledger.putRun(r);
-                    emit();
+                    emit(true);
                 })
             ));
             results.forEach((r) => this.activities.delete(r.id));
             return { results, partial: results.some((r) => r.status !== "complete") };
         } finally {
             publishing = false;
+            if (emitTimer !== undefined) clearTimeout(emitTimer);
             activityIds.forEach((id) => this.activities.delete(id));
             try {
                 unsubscribeHeartbeat();

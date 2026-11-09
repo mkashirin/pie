@@ -42,7 +42,7 @@ export async function showPlanLaunchMenu(ctx: ExtensionContext, options: PlanLau
                 lines: [options.statusText, options.toolSummary(selectedNames)],
                 items: [
                     { id: "start", label: "Start Plan mode", action: "start" },
-                    { id: "tools", label: "Choose tools, then start…", to: "tools" },
+                    { id: "tools", label: "Choose tools, then start...", to: "tools" },
                     { id: "settings", label: "Settings", action: "settings" },
                     { id: "help", label: "How Plan mode works", to: "help" },
                 ],
@@ -74,7 +74,7 @@ export async function showPlanLaunchMenu(ctx: ExtensionContext, options: PlanLau
                 actions: [
                     {
                         id: "start-with-tools",
-                        label: "Done — start with this policy",
+                        label: "Done - start with this policy",
                         action: "start-with-tools",
                     },
                 ],

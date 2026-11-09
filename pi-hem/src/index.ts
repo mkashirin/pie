@@ -4,9 +4,7 @@ import {
     type AutocompleteProvider,
     type AutocompleteSuggestions,
     CURSOR_MARKER,
-    decodeKittyPrintable,
     type EditorTheme,
-    matchesKey,
     SelectList,
     truncateToWidth,
     type TUI,
@@ -14,7 +12,13 @@ import {
     type TuiMouseEventResult,
     visibleWidth,
 } from "@earendil-works/pi-tui";
-import { HelixBuffer } from "./model.ts";
+import { graphemes, HelixBuffer } from "./model.ts";
+import { CommandController } from "./commands.ts";
+import { InputDecoder } from "./input.ts";
+import { bindings as modalBindings, resolveBinding } from "./compatibility.ts";
+import { createClipboard } from "./clipboard.ts";
+import { layout as sharedLayout } from "./layout.ts";
+type Matcher = (text: string, pattern: string) => { start: number; end: number }[];
 
 type Row = {
     cells: { text: string; index: number; width: number }[];
@@ -24,6 +28,96 @@ type Row = {
 
 export class HelixEditor extends CustomEditor {
     readonly buffer = new HelixBuffer();
+    private manualViewport = false;
+    readonly controller = new CommandController(this.buffer, {
+        matcher: (text, pattern) => this.matcher?.(text, pattern) ?? [],
+        clipboard: createClipboard(),
+        feedback: (message) => {
+            // deno-lint-ignore no-control-regex -- Strip terminal control characters from feedback.
+            this.controller.status = message.replace(/[\x00-\x1f\x7f-\x9f]/g, "�");
+            if (!this.disposed) this.tui.requestRender();
+        },
+        changed: () => {
+            if (!this.disposed) this.changed();
+        },
+        requestRender: () => {
+            if (!this.disposed) this.tui.requestRender();
+        },
+        requestCompletion: () => this.requestCompletion(true),
+        view: {
+            pageSize: 10,
+            scroll: (lines) => {
+                this.offset = Math.max(
+                    0,
+                    Math.min(Math.max(0, this.rows.length - this.visibleRows), this.offset + lines),
+                );
+                this.manualViewport = true;
+            },
+            align: (where) => {
+                const current = Math.max(0, this.rows.findIndex((row) => row.cursor));
+                this.offset = Math.max(
+                    0,
+                    current - (where === "top"
+                        ? 0
+                        : where === "center"
+                        ? Math.floor(this.visibleRows / 2)
+                        : this.visibleRows - 1),
+                );
+                this.manualViewport = true;
+            },
+            middle: () =>
+                this.rows[
+                    Math.min(this.rows.length - 1, this.offset + Math.floor(this.visibleRows / 2))
+                ]?.start ?? 0,
+            wordLabels: () => this.wordLabels(),
+            boundary: (where, count) => this.moveBoundary(where, count),
+            moveVisual: (direction, count) => this.moveVisual(direction, count),
+            page: (direction, count, half) =>
+                this.moveVisual(
+                    direction,
+                    count * Math.max(1, Math.floor(this.visibleRows / (half ? 2 : 1))),
+                ),
+            viewport: (where) => {
+                const row = this.rows[
+                    this.offset + (where === "top"
+                        ? 0
+                        : where === "middle"
+                        ? Math.floor(this.visibleRows / 2)
+                        : this.visibleRows - 1)
+                ];
+                if (row) {
+                    this.buffer.moveTo(row.start);
+                }
+            },
+        },
+    });
+    private wordTargets: { label: string; index: number }[] = [];
+    private wordPrefix = "";
+
+    private wordLabels(): void {
+        const units = graphemes(this.buffer.text);
+        const positions = this.rows.slice(this.offset, this.offset + this.visibleRows)
+            .flatMap((row) => row.cells)
+            .filter((cell) =>
+                /[\p{L}\p{N}_]/u.test(units[cell.index] ?? "")
+                && !/[\p{L}\p{N}_]/u.test(units[cell.index - 1] ?? "")
+            );
+        const double = positions.length > 26;
+        this.wordTargets = positions.slice(0, 676).map((cell, i) => ({
+            label: double
+                ? String.fromCharCode(97 + Math.floor(i / 26), 97 + i % 26)
+                : String.fromCharCode(97 + i),
+            index: cell.index,
+        }));
+        this.wordPrefix = "";
+        this.controller.status = this.wordTargets.length ? "Jump label" : "No visible words";
+        this.tui.requestRender();
+    }
+
+    private decoder = new InputDecoder();
+    private escapeTimer?: ReturnType<typeof setTimeout>;
+    private modalPrefix: string[] = [];
+    private disposed = false;
     private readonly editorTheme: EditorTheme;
     private readonly bindings: KeybindingsManager;
     private provider?: AutocompleteProvider;
@@ -33,7 +127,14 @@ export class HelixEditor extends CustomEditor {
     private timer?: ReturnType<typeof setTimeout>;
     private requestId = 0;
     private suggestionsVersion = -1;
-    private bracketedPaste: string | undefined;
+    private completionSnapshot = "";
+    private snapshot(): string {
+        return JSON.stringify([
+            this.buffer.revision,
+            this.buffer.primaryId,
+            this.buffer.selections,
+        ]);
+    }
     private promptHistory: string[] = [];
     private promptIndex = -1;
     private promptDraft = "";
@@ -43,7 +144,12 @@ export class HelixEditor extends CustomEditor {
     private maxSuggestions = 5;
     private visibleRows = 0;
 
-    constructor(tui: TUI, theme: EditorTheme, bindings: KeybindingsManager) {
+    constructor(
+        tui: TUI,
+        theme: EditorTheme,
+        bindings: KeybindingsManager,
+        private matcher?: Matcher,
+    ) {
         super(tui, theme, bindings, { embedWorkingStatus: true });
         this.editorTheme = theme;
         this.bindings = bindings;
@@ -67,8 +173,13 @@ export class HelixEditor extends CustomEditor {
 
     override setText(text: string): void {
         const previous = this.buffer.text;
+        this.controller.cancelPending();
+        this.modalPrefix = [];
+        this.wordTargets = [];
+        this.wordPrefix = "";
         if (!text && previous) this.buffer.reset();
         else this.buffer.setText(text);
+        this.buffer.enterInsert();
         this.cancelCompletion();
         if (previous !== this.buffer.text) this.changed(false);
         this.tui.requestRender();
@@ -76,7 +187,10 @@ export class HelixEditor extends CustomEditor {
 
     override insertTextAtCursor(text: string): void {
         if (this.buffer.mode !== "insert") this.buffer.enterInsert();
-        if (this.buffer.insert(text)) this.changed();
+        if (this.buffer.insert(text)) {
+            this.controller.recordInsertion(text);
+            this.changed();
+        }
     }
 
     override addToHistory(text: string): void {
@@ -163,16 +277,22 @@ export class HelixEditor extends CustomEditor {
 
     private async fetchCompletion(id: number, force: boolean): Promise<void> {
         const provider = this.provider;
-        if (!provider || id !== this.requestId) return;
+        if (this.disposed || !provider || id !== this.requestId) return;
         const controller = new AbortController();
         this.pending = controller;
         const { line, col } = this.getCursor();
+        const revision = this.buffer.revision;
+        const selection = JSON.stringify([this.buffer.primaryId, this.buffer.selections]);
         try {
             const result = await provider.getSuggestions(this.getLines(), line, col, {
                 signal: controller.signal,
                 force,
             });
-            if (controller.signal.aborted || id !== this.requestId) return;
+            if (
+                this.disposed || controller.signal.aborted || id !== this.requestId
+                || revision !== this.buffer.revision
+                || selection !== JSON.stringify([this.buffer.primaryId, this.buffer.selections])
+            ) return;
             this.pending = undefined;
             if (!result?.items.length) {
                 this.cancelCompletion();
@@ -181,6 +301,7 @@ export class HelixEditor extends CustomEditor {
             const selected = this.list?.getSelectedItem();
             const selectedValue = selected
                 && this.suggestions?.items[Number(selected.value)]?.value;
+            this.completionSnapshot = this.snapshot();
             this.suggestions = result;
             this.suggestionsVersion = id;
             this.list = new SelectList(
@@ -202,7 +323,10 @@ export class HelixEditor extends CustomEditor {
     }
 
     private acceptCompletion(): boolean {
-        if (this.suggestionsVersion !== this.requestId) return false;
+        if (
+            this.disposed || this.suggestionsVersion !== this.requestId
+            || this.completionSnapshot !== this.snapshot()
+        ) return false;
         const item = this.list?.getSelectedItem();
         const choice = item && this.suggestions?.items[Number(item.value)];
         if (!choice || !this.suggestions || !this.provider) return false;
@@ -215,7 +339,79 @@ export class HelixEditor extends CustomEditor {
             this.suggestions.prefix,
         );
         const before = this.buffer.text;
-        this.buffer.setText(result.lines.join("\n"));
+        const after = result.lines.join("\n");
+        const segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+        const oldCells = this.buffer.cells;
+        const newCells = Array.from(segmenter.segment(after), (part) => part.segment);
+        let prefix = 0, start = 0;
+        while (
+            prefix < oldCells.length && prefix < newCells.length
+            && oldCells[prefix] === newCells[prefix]
+        ) {
+            start += oldCells[prefix]!.length;
+            prefix++;
+        }
+        let oldEnd = oldCells.length, newEnd = newCells.length;
+        let end = before.length, afterEnd = after.length;
+        while (
+            oldEnd > prefix && newEnd > prefix
+            && oldCells[oldEnd - 1] === newCells[newEnd - 1]
+        ) {
+            end -= oldCells[--oldEnd]!.length;
+            afterEnd -= newCells[--newEnd]!.length;
+        }
+        const primaryHead = this.buffer.visualHead();
+        // Replay the logical token replacement, not just its changed letters.
+        // Keep the actual broadcast edit minimal and its context checks unchanged.
+        let replayStart = start, replayEnd = end, replayAfterEnd = afterEnd;
+        let tokenStart = primaryHead, tokenEnd = primaryHead;
+        const boundaries = [0];
+        for (const cell of oldCells) boundaries.push(boundaries.at(-1)! + cell.length);
+        const headCell = boundaries.indexOf(primaryHead);
+        if (headCell >= 0) {
+            let left = headCell, right = headCell;
+            while (left > 0 && !/\s/u.test(oldCells[left - 1]!)) left--;
+            while (right < oldCells.length && !/\s/u.test(oldCells[right]!)) right++;
+            tokenStart = boundaries[left]!;
+            tokenEnd = boundaries[right]!;
+            const providerPrefix = this.suggestions.prefix;
+            const providerStart = primaryHead - providerPrefix.length;
+            if (
+                providerPrefix && providerStart >= tokenStart && providerStart <= start
+                && boundaries.includes(providerStart)
+                && before.slice(providerStart, primaryHead) === providerPrefix
+            ) tokenStart = providerStart;
+            const tokenAfterEnd = after.length - (before.length - tokenEnd);
+            if (
+                start >= tokenStart && end <= tokenEnd
+                && tokenAfterEnd >= tokenStart
+                && !/\s/u.test(after.slice(tokenStart, tokenAfterEnd))
+            ) {
+                replayStart = tokenStart;
+                replayEnd = tokenEnd;
+                replayAfterEnd = tokenAfterEnd;
+            }
+        }
+        const saved = this.buffer.selections.map((s) => ({ ...s }));
+        const relativeStart = start - primaryHead, relativeEnd = end - primaryHead;
+        const context = (head: number) => before.slice(0, head).split(/\s/u).at(-1);
+        const matching = saved.every((s) => {
+            const head = this.buffer.visualHead(s);
+            return context(head) === context(primaryHead) && head + relativeStart >= 0
+                && before.slice(head + relativeStart, head + relativeEnd)
+                    === before.slice(start, end);
+        });
+        const active = matching ? saved : [{ ...this.buffer.primary }];
+        if (!matching) this.buffer.setSelections(active, this.buffer.primaryId);
+        const edits = active.map((s) => {
+            const head = this.buffer.visualHead(s);
+            return {
+                start: head + relativeStart,
+                end: head + relativeEnd,
+                text: after.slice(start, afterEnd),
+            };
+        });
+        this.buffer.replaceRanges(edits);
         const target = result.lines.slice(0, result.cursorLine).join("\n").length
             + (result.cursorLine ? 1 : 0) + result.cursorCol;
         let utf16 = 0;
@@ -226,9 +422,30 @@ export class HelixEditor extends CustomEditor {
             index++;
         }
         this.buffer.enterInsert();
-        this.buffer.moveTo(index);
+        if (matching && active.length > 1) {
+            this.buffer.setSelections(
+                active.map((s, i) => {
+                    const edit = edits[i]!;
+                    const delta = edits.filter((e) => e.start < edit.start).reduce(
+                        (n, e) => n + e.text.length - (e.end - e.start),
+                        0,
+                    );
+                    const position = edit.start + delta + target - start;
+                    return { ...s, start: position, end: position, reversed: false };
+                }),
+                this.buffer.primaryId,
+            );
+        } else this.buffer.moveTo(index);
         this.cancelCompletion();
-        if (before !== this.buffer.text) this.changed(false);
+        if (before !== this.buffer.text) {
+            this.controller.recordCompletion(
+                replayStart - primaryHead,
+                replayEnd - primaryHead,
+                after.slice(replayStart, replayAfterEnd),
+                target - replayStart,
+            );
+            this.changed(false);
+        }
         return true;
     }
 
@@ -255,6 +472,7 @@ export class HelixEditor extends CustomEditor {
         this.cancelCompletion();
         // Pi's default Editor clears itself before calling onSubmit. Pi's normal
         // submission handler does not clear the buffer, so do that here as well.
+        this.controller.cancelPending();
         this.buffer.reset();
         this.promptIndex = -1;
         this.onChange?.("");
@@ -262,26 +480,137 @@ export class HelixEditor extends CustomEditor {
         this.onSubmit?.(text);
     }
 
-    private handleBracketedPaste(data: string): boolean {
-        if (this.bracketedPaste === undefined && !data.includes("\x1b[200~")) return false;
-        if (this.bracketedPaste === undefined) {
-            const start = data.indexOf("\x1b[200~");
-            this.bracketedPaste = data.slice(start + 6);
-        } else this.bracketedPaste += data;
-        const end = this.bracketedPaste.indexOf("\x1b[201~");
-        if (end >= 0) {
-            const text = this.bracketedPaste.slice(0, end);
-            const rest = this.bracketedPaste.slice(end + 6);
-            this.bracketedPaste = undefined;
-            if (text) this.insertTextAtCursor(text);
-            if (rest) this.handleInput(rest);
+    override handleInput(data: string): void {
+        if (this.disposed) return;
+        if (this.escapeTimer) clearTimeout(this.escapeTimer);
+        const events = this.decoder.feed(data);
+        this.escapeTimer = setTimeout(() => {
+            this.escapeTimer = undefined;
+            if (this.disposed) return;
+            for (const event of this.decoder.flushEscape()) {
+                if (event.type === "key") this.handleKey(event.key, "\x1b");
+                else this.insertTextAtCursor(event.text);
+            }
+        }, 25);
+        for (const event of events) {
+            if (event.type === "paste") this.insertTextAtCursor(event.text);
+            else this.handleKey(event.key, events.length === 1 ? data : event.key);
         }
-        return true;
     }
 
-    override handleInput(data: string): void {
-        if (this.handleBracketedPaste(data)) return;
+    private handleKey(key: string, data: string): void {
         const kb = this.bindings;
+        if (this.wordTargets.length) {
+            const prefix = this.wordPrefix + key;
+            const target = this.wordTargets.find((item) => item.label === prefix);
+            if (target) this.buffer.moveTo(target.index);
+            if (
+                key !== "escape" && !target
+                && this.wordTargets.some((item) => item.label.startsWith(prefix))
+            ) {
+                this.wordPrefix = prefix;
+            } else {
+                this.wordTargets = [];
+                this.wordPrefix = "";
+                this.controller.status = "";
+            }
+            this.tui.requestRender();
+            return;
+        }
+        if (kb.matches(data, "tui.editor.historyPrevious")) {
+            this.browse(1);
+            return;
+        }
+        if (kb.matches(data, "tui.editor.historyNext")) {
+            this.browse(-1);
+            return;
+        }
+        if (key === "escape" || kb.matches(data, "app.interrupt")) {
+            if (this.list) {
+                this.cancelCompletion();
+                return;
+            }
+            if (this.modalPrefix.length) {
+                this.modalPrefix = [];
+                this.controller.cancelPending();
+                this.tui.requestRender();
+                return;
+            }
+            if (this.controller.cancelPending()) {
+                this.tui.requestRender();
+                return;
+            }
+            if (this.buffer.mode !== "normal") {
+                this.buffer.escape();
+                this.tui.requestRender();
+                return;
+            }
+            const primary = this.buffer.primary;
+            if (this.buffer.selections.length > 1 || primary.start !== primary.end) {
+                const head = this.buffer.visualHead();
+                this.buffer.setSelections([{
+                    id: primary.id,
+                    start: head,
+                    end: head,
+                    reversed: false,
+                }]);
+                this.tui.requestRender();
+                return;
+            }
+            (this.onEscape ?? this.actionHandlers.get("app.interrupt"))?.();
+            return;
+        }
+        if (this.buffer.mode === "normal" || this.buffer.mode === "select") {
+            const owned = this.controller.hasPending;
+            const sequence = [...this.modalPrefix, key];
+            const resolved = resolveBinding(this.buffer.mode, sequence);
+            const hadPrefix = this.modalPrefix.length > 0;
+            this.modalPrefix = resolved.prefix && !resolved.binding ? sequence : [];
+            if (
+                key === "enter" && !hadPrefix && !owned
+            ) {
+                this.submit();
+                return;
+            }
+            if (hadPrefix && !resolved.binding && !resolved.prefix && !this.controller.pending) {
+                return;
+            }
+            if (resolved.binding?.classification === "excluded") {
+                this.controller.cancelPending();
+                this.modalPrefix = [];
+                this.controller.status = resolved.binding.reason ?? "Unavailable in prompt";
+                this.tui.requestRender();
+                return;
+            }
+            if (
+                resolved.prefix && !resolved.binding && !this.controller.pending
+                && !modalBindings.some((binding) =>
+                    binding.classification !== "excluded"
+                    && binding.modes.includes(this.buffer.mode)
+                    && sequence.every((part, i) => binding.keys[i] === part)
+                )
+            ) {
+                this.controller.status = `${sequence.join(" ")} …`;
+                this.tui.requestRender();
+                return;
+            }
+            if (key === "enter" && (owned || hadPrefix) && !this.controller.search) {
+                this.controller.cancelPending();
+                this.modalPrefix = [];
+                this.controller.status = "Cancelled pending command";
+                this.tui.requestRender();
+                return;
+            }
+            const handled = this.controller.handleKey(key);
+            if (resolved.binding?.classification === "pending" && !handled) {
+                this.controller.status = resolved.binding.reason ?? "Not available in this editor";
+            }
+            if (handled || owned || hadPrefix || resolved.prefix || this.controller.pending) {
+                this.cancelCompletion();
+                this.tui.requestRender();
+                return;
+            }
+        }
         // Pi's application bindings take precedence, except Esc (the mode switch).
         if (this.onExtensionShortcut?.(data)) return;
         if (kb.matches(data, "app.clipboard.pasteImage")) {
@@ -341,275 +670,81 @@ export class HelixEditor extends CustomEditor {
             const accepted = this.acceptCompletion();
             if (accepted && (!slash || kb.matches(data, "tui.input.tab"))) return;
         }
+        if (this.controller.hasPending) {
+            this.controller.handleKey(key);
+            this.tui.requestRender();
+            return;
+        }
         if (kb.matches(data, "tui.input.submit")) {
+            if (this.buffer.mode === "replace") {
+                this.controller.handleKey("enter");
+                return;
+            }
             this.submit();
             return;
         }
-        if (this.buffer.mode === "insert") {
+        if (this.buffer.mode === "insert" || this.buffer.mode === "replace") {
             if (kb.matches(data, "tui.input.tab")) {
                 this.requestCompletion(true);
                 return;
             }
-            if (kb.matches(data, "tui.input.newLine")) {
-                if (this.buffer.insert("\n")) this.changed();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.undo")) {
-                if (this.buffer.undo()) this.changed(false);
-                return;
-            }
-            if (kb.matches(data, "tui.editor.historyPrevious")) {
-                this.browse(1);
-                return;
-            }
-            if (kb.matches(data, "tui.editor.historyNext")) {
-                this.browse(-1);
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorUp")) {
-                this.buffer.moveVertical(-1);
-                this.requestCompletion();
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorDown")) {
-                this.buffer.moveVertical(1);
-                this.requestCompletion();
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorLeft")) {
-                this.buffer.moveHorizontal(-1);
-                this.requestCompletion();
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorRight")) {
-                this.buffer.moveHorizontal(1);
-                this.requestCompletion();
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorLineStart")) {
-                this.buffer.moveLineEnd(true);
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorLineEnd")) {
-                this.buffer.moveLineEnd();
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorWordLeft")) {
-                this.buffer.moveWord("back");
-                this.tui.requestRender();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.cursorWordRight")) {
-                this.buffer.moveWord("next");
-                this.tui.requestRender();
-                return;
-            }
-            if (
-                kb.matches(data, "tui.editor.deleteCharBackward")
-                || matchesKey(data, "shift+backspace")
-            ) {
-                if (this.buffer.deleteAt(true)) this.changed();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.deleteCharForward")) {
-                if (this.buffer.deleteAt(false)) this.changed();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.deleteToLineStart")) {
-                if (this.buffer.deleteRange(this.buffer.lineRange()[0], this.buffer.cursor)) {
-                    this.changed();
-                }
-                return;
-            }
-            if (kb.matches(data, "tui.editor.deleteToLineEnd")) {
-                if (this.buffer.deleteRange(this.buffer.cursor, this.buffer.lineRange()[1])) {
-                    this.changed();
-                }
-                return;
-            }
-            if (kb.matches(data, "tui.editor.deleteWordBackward")) {
-                const end = this.buffer.cursor;
-                this.buffer.moveWord("back");
-                if (this.buffer.deleteRange(this.buffer.cursor, end)) this.changed();
-                return;
-            }
-            if (kb.matches(data, "tui.editor.yank")) {
-                if (this.buffer.insert(this.buffer.register)) this.changed();
-                return;
-            }
-            const printable = decodeKittyPrintable(data)
-                ?? (data.length === 1 && data.charCodeAt(0) >= 32 ? data : undefined);
-            if (printable) {
-                if (this.buffer.insert(printable)) this.changed();
-                return;
-            }
-            return;
         }
-        // Check Shift explicitly as Kitty terminals can report the base letter
-        // rather than its uppercase printable form in CSI-u sequences.
-        if (matchesKey(data, "shift+i")) {
-            this.buffer.moveTo(this.buffer.lineRange()[0]);
-            this.buffer.enterInsert();
-            this.tui.requestRender();
-            return;
-        }
-        if (matchesKey(data, "shift+a")) {
-            this.buffer.moveTo(this.buffer.lineRange()[1]);
-            this.buffer.enterInsert();
-            this.tui.requestRender();
-            return;
-        }
-        const key = decodeKittyPrintable(data) ?? data;
-        switch (key) {
-            case "i":
-                this.buffer.enterInsert();
-                break;
-            case "a":
-                this.buffer.enterInsert(true);
-                break;
-            case "v":
-                this.buffer.toggleSelect();
-                break;
-            case "x":
-                this.buffer.selectLine();
-                break;
-            case "h":
-                this.buffer.moveHorizontal(-1);
-                break;
-            case "l":
-                this.buffer.moveHorizontal(1);
-                break;
-            case "j":
-                this.buffer.moveVertical(1);
-                break;
-            case "k":
-                this.buffer.moveVertical(-1);
-                break;
-            case "w":
-                this.buffer.moveWord("next");
-                break;
-            case "b":
-                this.buffer.moveWord("back");
-                break;
-            case "e":
-                this.buffer.moveWord("end");
-                break;
-            case "0":
-                this.buffer.moveLineEnd(true);
-                break;
-            case "$":
-                this.buffer.moveLineEnd();
-                break;
-            case "d":
-                if (this.buffer.deleteSelection()) this.changed(false);
-                break;
-            case "c":
-                if (this.buffer.deleteSelection(true)) this.changed(false);
-                break;
-            case "y":
-                this.buffer.yank();
-                break;
-            case "p":
-                if (this.buffer.paste()) this.changed(false);
-                break;
-            case "u":
-                if (this.buffer.undo()) this.changed(false);
-                break;
-            default:
-                if (kb.matches(data, "tui.editor.cursorLeft")) this.buffer.moveHorizontal(-1);
-                else if (kb.matches(data, "tui.editor.cursorRight")) this.buffer.moveHorizontal(1);
-                else if (kb.matches(data, "tui.editor.cursorUp")) this.buffer.moveVertical(-1);
-                else if (kb.matches(data, "tui.editor.cursorDown")) this.buffer.moveVertical(1);
-                else if (kb.matches(data, "tui.editor.undo") && this.buffer.undo()) {
-                    this.changed(false);
-                }
-                break;
-        }
+        const aliases = [
+            ["tui.input.newLine", "enter"],
+            ["tui.editor.undo", "ctrl+z"],
+            ["tui.editor.cursorUp", "up"],
+            ["tui.editor.cursorDown", "down"],
+            ["tui.editor.cursorLeft", "left"],
+            ["tui.editor.cursorRight", "right"],
+            ["tui.editor.cursorLineStart", "home"],
+            ["tui.editor.cursorLineEnd", "end"],
+            ["tui.editor.cursorWordLeft", "ctrl+left"],
+            ["tui.editor.cursorWordRight", "ctrl+right"],
+            ["tui.editor.deleteCharBackward", "backspace"],
+            ["tui.editor.deleteCharForward", "delete"],
+            ["tui.editor.deleteToLineStart", "ctrl+u"],
+            ["tui.editor.deleteToLineEnd", "delete-line-end"],
+            ["tui.editor.deleteWordBackward", "ctrl+w"],
+            ["tui.editor.yank", "ctrl+r"],
+        ] as const;
+        const canonical = aliases.find(([action]) => kb.matches(data, action))?.[1] ?? key;
+        if (canonical === "ctrl+z") {
+            const inserting = this.buffer.mode === "insert" || this.buffer.mode === "replace";
+            if (inserting) this.controller.handleKey("ctrl+o");
+            this.controller.handleKey("u");
+        } else if (kb.matches(data, "tui.editor.yank")) {
+            this.controller.handleKey("ctrl+r");
+            this.controller.handleKey("\"");
+        } else this.controller.handleKey(canonical);
         this.tui.requestRender();
-    }
-
-    private layout(columns: number): Row[] {
-        const rows: Row[] = [];
-        const cells = this.buffer.cells;
-
-        const isSpace = (cell: string) => /^\s+$/u.test(cell);
-
-        const display = (index: number) => {
-            const text = cells[index]!;
-            // A cluster wider than the whole editor cannot be drawn without clipping.
-            return visibleWidth(text) > columns ? "?" : text;
-        };
-
-        let lineStart = 0;
-        for (let lineEnd = 0; lineEnd <= cells.length; lineEnd++) {
-            if (lineEnd < cells.length && cells[lineEnd] !== "\n") continue;
-            if (lineStart === lineEnd) {
-                rows.push({
-                    cells: [],
-                    start: lineStart,
-                    cursor: this.buffer.cursor === lineStart,
-                });
-            }
-            let start = lineStart;
-            while (start < lineEnd) {
-                let end = start;
-                let used = 0;
-                let breakAfterSpace = -1;
-                while (end < lineEnd) {
-                    const width = Math.max(1, visibleWidth(display(end)));
-                    if (end > start && used + width > columns) break;
-                    used += width;
-                    end++;
-                    // Keep whitespace on the preceding visual line. Break before the
-                    // next word instead of splitting that word across the right edge.
-                    if (isSpace(cells[end - 1]!) && end < lineEnd && !isSpace(cells[end]!)) {
-                        breakAfterSpace = end;
-                    }
-                }
-                if (end < lineEnd && breakAfterSpace > start) end = breakAfterSpace;
-                const rowCells = Array.from({ length: end - start }, (_, offset) => {
-                    const index = start + offset;
-                    const text = display(index);
-                    return { text, index, width: Math.max(1, visibleWidth(text)) };
-                });
-                rows.push({
-                    cells: rowCells,
-                    start,
-                    cursor: this.buffer.cursor >= start && this.buffer.cursor < end,
-                });
-                start = end;
-            }
-            if (this.buffer.cursor === lineEnd && lineStart < lineEnd) {
-                const last = rows[rows.length - 1]!;
-                const used = last.cells.reduce((total, cell) => total + cell.width, 0);
-                if (used >= columns) rows.push({ cells: [], start: lineEnd, cursor: true });
-                else last.cursor = true;
-            }
-            lineStart = lineEnd + 1;
-        }
-        return rows;
     }
 
     override render(width: number): string[] {
         if (width < 1) return [];
         const pad = Math.min(this.padding, Math.floor((width - 1) / 2));
         const columns = Math.max(1, width - 2 * pad - (pad ? 0 : 1));
-        this.rows = this.layout(columns);
+        this.rows = sharedLayout(this.buffer, columns);
         const current = Math.max(0, this.rows.findIndex((row) => row.cursor));
         const maxRows = Math.max(5, Math.floor((this.tui.terminal.rows || 24) * 0.3));
-        this.offset = Math.max(0, Math.min(this.offset, current));
-        if (current >= this.offset + maxRows) this.offset = current - maxRows + 1;
+        this.controller.options.view!.pageSize = maxRows;
+        if (!this.manualViewport) {
+            this.offset = Math.max(0, Math.min(this.offset, current));
+            if (current >= this.offset + maxRows) this.offset = current - maxRows + 1;
+        }
+        this.manualViewport = false;
         const shown = this.rows.slice(this.offset, this.offset + maxRows);
         this.visibleRows = shown.length;
-        const [a, b] = this.buffer.selection;
+        const ranges = this.buffer.selections.map((s) => this.buffer.effectiveRange(s));
+        const heads = new Set(
+            this.buffer.selections.map((s) =>
+                this.buffer.utf16ToGrapheme(this.buffer.visualHead(s))
+            ),
+        );
         const top = this.renderTopBorder(width, this.offset);
-        const modeLabel = `── ${this.buffer.mode.toUpperCase()} ──`;
+        // deno-lint-ignore no-control-regex -- Status must not inject terminal controls.
+        const status = this.controller.status.replace(/[\x00-\x1f\x7f-\x9f]/g, "�");
+        const detail = truncateToWidth(status, Math.max(0, width - 32), "");
+        const modeLabel = `── ${this.buffer.mode.toUpperCase()}${detail ? ` ${detail}` : ""} ──`;
         // Preserve Pi's working indicator at the left of the top border. Short
         // border segments frame both sides of the right-aligned mode indicator.
         // At narrow widths, prioritize the complete working indicator instead.
@@ -624,18 +759,45 @@ export class HelixEditor extends CustomEditor {
             let used = 0;
             for (const item of row.cells) {
                 if (item.index === this.buffer.cursor && this.focused) output += CURSOR_MARKER;
-                const selected = this.buffer.mode !== "insert" && item.index >= a && item.index < b;
-                const cursor = item.index === this.buffer.cursor;
-                output += selected || cursor
-                    ? `\x1b[${cursor ? "7;4" : "7"}m${item.text}\x1b[0m`
+                const unit = this.buffer.graphemeToUtf16(item.index);
+                const selected = this.buffer.mode !== "insert"
+                    && ranges.some(([a, b]) => unit >= a && unit < b);
+                const cursor = heads.has(item.index);
+                const label = this.wordTargets.find((target) =>
+                    item.index >= target.index
+                    && item.index < target.index + target.label.length - this.wordPrefix.length
+                );
+                const glyph = label
+                    ? truncateToWidth(
+                        label.label.slice(
+                            this.wordPrefix.length + item.index - label.index,
+                            this.wordPrefix.length + item.index - label.index + 1,
+                        ),
+                        item.width,
+                        "",
+                    )
+                        .padEnd(item.width, " ")
                     : item.text;
+                output += selected || cursor || label
+                    ? `\x1b[${cursor ? "7;4" : "7"}m${glyph}\x1b[0m`
+                    : glyph;
                 used += item.width;
             }
-            if (row.cursor && !row.cells.some((item) => item.index === this.buffer.cursor)) {
-                if (used >= columns) { // There is no room for a cursor at the right edge.
-                    output += this.focused ? CURSOR_MARKER : "";
-                } else {
-                    output += (this.focused ? CURSOR_MARKER : "") + "\x1b[7m \x1b[0m";
+            const edge = row.cells.length
+                ? row.cells[row.cells.length - 1]!.index + 1
+                : row.start;
+            if (
+                heads.has(edge)
+                && (row.cursor
+                    || !this.rows.some((other) =>
+                        other !== row
+                        && (other.start === edge || other.cells.some((c) => c.index === edge))
+                    ))
+            ) {
+                const primary = row.cursor && edge === this.buffer.cursor;
+                if (primary && this.focused) output += CURSOR_MARKER;
+                if (used < columns) {
+                    output += "\x1b[7;4m \x1b[0m";
                     used++;
                 }
             }
@@ -677,22 +839,135 @@ export class HelixEditor extends CustomEditor {
         return { handled: true, focus: true };
     }
 
+    private moveBoundary(
+        where: "start" | "end" | "firstNonblank" | "middle",
+        count: number,
+    ): void {
+        if (!this.rows.length) return;
+        this.buffer.setSelections(
+            this.buffer.selections.map((s) => {
+                const head = this.buffer.utf16ToGrapheme(this.buffer.visualHead(s));
+                let rowIndex = this.rows.findIndex((row) =>
+                    row.cells.some((c) => c.index === head)
+                );
+                if (rowIndex < 0) rowIndex = this.rows.findIndex((row) => row.start === head);
+                const row = this
+                    .rows[Math.min(this.rows.length - 1, Math.max(0, rowIndex) + count - 1)]!;
+                let index = row.start;
+                if (where === "end") index = row.cells.at(-1)?.index ?? row.start;
+                if (where === "firstNonblank") {
+                    index = row.cells.find((c) => !/^\s+$/u.test(c.text))?.index ?? row.start;
+                }
+                if (where === "middle") {
+                    const middle = row.cells.reduce((n, c) => n + c.width, 0) / 2;
+                    let used = 0;
+                    for (const cell of row.cells) {
+                        index = cell.index;
+                        used += cell.width;
+                        if (used >= middle) break;
+                    }
+                }
+                const unit = this.buffer.graphemeToUtf16(index);
+                if (this.buffer.mode !== "select") {
+                    return { ...s, start: unit, end: unit, reversed: false };
+                }
+                const anchor = s.reversed
+                    ? this.buffer.utf16ToGrapheme(s.end) - 1
+                    : this.buffer.utf16ToGrapheme(s.start);
+                return {
+                    ...s,
+                    start: this.buffer.graphemeToUtf16(Math.min(anchor, index)),
+                    end: this.buffer.graphemeToUtf16(
+                        Math.min(this.buffer.length, Math.max(anchor, index) + 1),
+                    ),
+                    reversed: index < anchor,
+                };
+            }),
+            this.buffer.primaryId,
+        );
+    }
+
+    private moveVisual(direction: -1 | 1, count: number): void {
+        if (!this.rows.length) {
+            for (let i = 0; i < count; i++) this.buffer.moveVertical(direction);
+            return;
+        }
+        this.buffer.setSelections(
+            this.buffer.selections.map((s) => {
+                const head = this.buffer.utf16ToGrapheme(this.buffer.visualHead(s));
+                let current = this.rows.findIndex((row) => row.cells.some((c) => c.index === head));
+                if (current < 0) current = this.rows.findIndex((row) => row.start === head);
+                current = Math.max(0, current);
+                const source = this.rows[current]!;
+                const column = s.goalColumn
+                    ?? source.cells.filter((c) => c.index < head).reduce((n, c) => n + c.width, 0);
+                const target = this
+                    .rows[
+                        Math.max(0, Math.min(this.rows.length - 1, current + direction * count))
+                    ]!;
+                let used = 0, index = target.start;
+                for (const cell of target.cells) {
+                    if (used > column) break;
+                    index = cell.index;
+                    used += cell.width;
+                }
+                const unit = this.buffer.graphemeToUtf16(index);
+                if (this.buffer.mode !== "select") {
+                    return { ...s, start: unit, end: unit, reversed: false, goalColumn: column };
+                }
+                const anchor = s.reversed
+                    ? this.buffer.utf16ToGrapheme(s.end) - 1
+                    : this.buffer.utf16ToGrapheme(s.start);
+                return {
+                    ...s,
+                    start: this.buffer.graphemeToUtf16(Math.min(anchor, index)),
+                    end: this.buffer.graphemeToUtf16(
+                        Math.min(this.buffer.length, Math.max(anchor, index) + 1),
+                    ),
+                    reversed: index < anchor,
+                    goalColumn: column,
+                };
+            }),
+            this.buffer.primaryId,
+        );
+    }
+
     dispose(): void {
+        this.disposed = true;
+        if (this.escapeTimer) clearTimeout(this.escapeTimer);
+        this.controller.dispose();
+        this.controller.cancelPending();
         this.cancelCompletion();
     }
 }
 
 export default function(pi: ExtensionAPI) {
     let active: HelixEditor | undefined;
-    pi.on("session_start", (_event, ctx) => {
+    let generation = 0;
+    pi.registerCommand("hem", {
+        description: "Helix editor help",
+        handler: (_args, ctx) => {
+            ctx.ui.notify(
+                "Helix prompt editor: insert/select/replace modes; counts and motions; selections and multi-cursor edits; registers, yank/paste, undo/redo; / and ? regex search; macros and repeat. Escape cancels completion, pending command, mode, then selection before interrupt. Syntax/tree-sitter, LSP, files, windows and shell commands are excluded. Some bindings remain pending: see the compatibility manifest for per-key status.",
+                "info",
+            );
+            return Promise.resolve();
+        },
+    });
+    pi.on("session_start", async (_event, ctx) => {
         if (ctx.mode !== "tui") return;
+        const current = ++generation;
         try {
+            const { initializeRegex, findRegex } = await import("./regex.ts");
+            await initializeRegex();
+            if (current !== generation) return;
             ctx.ui.setEditorComponent((tui, theme, keybindings) => {
                 active?.dispose();
-                active = new HelixEditor(tui, theme, keybindings);
+                active = new HelixEditor(tui, theme, keybindings, findRegex);
                 return active;
             });
         } catch (error) {
+            if (current !== generation) return;
             active?.dispose();
             active = undefined;
             ctx.ui.setEditorComponent(undefined);
@@ -700,6 +975,7 @@ export default function(pi: ExtensionAPI) {
         }
     });
     pi.on("session_shutdown", () => {
+        generation++;
         active?.dispose();
         active = undefined;
     });
