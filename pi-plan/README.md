@@ -1,12 +1,11 @@
 # pi-plan
 
 Plan before implementing: explore a project, answer focused questions, review a completed plan,
-then choose whether to implement, save, or export it. This is a source-based adaptation of
-`@narumitw/pi-plan-mode` **0.58.3**, with readable wrapped menus, questionnaires, and chat cards.
+then choose whether to implement, save, or export it. Menus, questionnaires, and chat cards use
+readable wrapped text.
 
 The planning workflow retains settings, saved plans, session recovery, tool policies, and
-model/thinking selection for implementation. Local release **0.1.0** is independent of the upstream
-version.
+model/thinking selection for implementation. Local release **0.1.0**.
 
 ## Install
 
@@ -81,16 +80,13 @@ visibility alone does not activate Plan Mode.
 ## Reference and development
 
 Read the [workflow and execution reference](docs/reference.md) for ownership/cancellation, settings
-persistence, tool contracts, TUI/RPC behavior, verification, and upstream update rules. Generic
+persistence, tool contracts, TUI/RPC behavior, verification, and source update rules. Generic
 terminal interaction is shared through the private [TUI workspace](../docs/tui.md); Plan-specific
 menus, workflow, chat, and widget stay local.
 
 Use `./install.sh --dev` and `npm run check` from the bundle root. See the
 [development guide](../docs/development.md) for focused checks and manual terminal coverage.
 
-## License and provenance
+## License
 
-MIT, **Copyright (c) 2026 narumiruna**. The original [LICENSE](LICENSE) is retained. Plan's typed
-sources derive from upstream **0.58.3**; the focused menu/questionnaire implementation derives from
-TUI Kit **0.59.0**. See [provenance and updates](docs/reference.md#provenance-and-updates) for
-archive identity, upstream links, and attribution constraints.
+MIT. See [LICENSE](LICENSE).

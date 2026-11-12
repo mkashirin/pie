@@ -77,14 +77,13 @@ correctness.
 Exact tool inputs, output schema, completeness semantics, limits, and artifact handling are in the
 [tool and safety reference](docs/reference.md#tool-contracts).
 
-## Development and provenance
+## Development
 
 Use `./install.sh --dev` and `npm run check` from the bundle root. Focused commands are `npm run
 check:lsp` and `npm run smoke:lsp`; see
 [verification and rollout](docs/reference.md#development-and-rollout) for what they do and do not
 cover, including provider rollback.
 
-Local release **0.1.0**, MIT ([LICENSE](LICENSE)). Behavioral reference: `@narumitw/pi-lsp`
-**0.49.11**, with no code copied. See
-[dependency licensing](docs/reference.md#provenance-and-licensing); servers have independent
-licenses and installation requirements.
+Local release **0.1.0**, MIT ([LICENSE](LICENSE)). See
+[dependency licensing](docs/reference.md#licensing); servers have independent licenses and
+installation requirements.

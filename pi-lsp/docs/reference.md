@@ -137,15 +137,13 @@ Remove old LSP extension/package registrations before loading this bundle, keep 
 backups, then `/reload`. Check diagnostics on a small project before enabling writes.
 
 To roll back LSP specifically, disable the bundle's local `pi-lsp/index.ts` entrypoint, restore
-`npm:@narumitw/pi-lsp` package registration, and reload Pi. This requires an intentional discovery
+your previous LSP package registration, and reload Pi. This requires an intentional discovery
 manifest/configuration change; do not load both providers. Configuration is neither migrated nor
 deleted automatically.
 
-## Provenance and licensing
+## Licensing
 
-Local release **0.1.0**, MIT ([LICENSE](../LICENSE)). This is a local implementation, not a
-vendored copy or fork. The behavioral reference is `@narumitw/pi-lsp` **0.49.11**, with no code
-copied.
+Local release **0.1.0**, MIT ([LICENSE](../LICENSE)).
 
 Pinned runtime dependencies: `vscode-jsonrpc` **8.2.0**, `vscode-languageserver-protocol`
 **3.17.5** (MIT, Microsoft), and `cross-spawn` **7.0.6** (MIT). Transitive

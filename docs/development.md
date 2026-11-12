@@ -133,11 +133,11 @@ semantics, keybindings, licensing, and useful manual checks in the linked refere
 check local paths and anchors. Distinguish inspected command definitions, executed offline tests,
 and live/manual results in handoffs. Do not claim coverage for checks that did not run.
 
-## Releases and provenance
+## Releases
 
 The local release is **0.1.0**. Keep root and six extension release versions and their root
-lockfile entries in sync; the private TUI support package is not another extension release.
-Upstream Plan **0.58.3**, Kit **0.59.0**, and other dependency versions remain independent. Inspect
+lockfile entries in sync; the private TUI support package is not another extension release. Plan's
+source baseline **0.58.3**, Kit **0.59.0**, and dependency versions remain independent. Inspect
 manifests when changing release metadata rather than inferring versions from package names. Private
 package flags prevent accidental npm publication, not Git-based Pi installation.
 
@@ -150,5 +150,5 @@ publication.
 
 Retain package LICENSE files and third-party notices. Plan source must not be replaced by compiled
 `dist/` or the full upstream Kit. See
-[Plan provenance and update constraints](../pi-plan/docs/reference.md#provenance-and-updates) and
+[Plan source update constraints](../pi-plan/docs/reference.md#source-updates) and
 [HEM notices](../pi-hem/THIRD_PARTY_NOTICES.md) before redistributing source or dependencies.

@@ -137,24 +137,17 @@ resize, remapped keys/focus, model/thinking and tool selection, questionnaire nu
 review/Back/cancellation, plan save/export, and current/fresh implementation handoff. Offline tests
 are not live terminal, model-access, or minimum-Node verification.
 
-## Provenance and updates
+## Source updates
 
-Typed Plan Mode modules were restored from the published package's original `src/`, not
-reconstructed from generated JavaScript. Upstream **0.58.3** archive SHA-1:
-`02e0a9e0a2419fbac0603fb7f56a25900fb364ff`, recovered from the local npm cache.
+Keep typed Plan Mode modules as source rather than reconstructing them from generated JavaScript.
+The source baseline is **0.58.3**, archive SHA-1: `02e0a9e0a2419fbac0603fb7f56a25900fb364ff`.
 
-Focused interaction modules derive from the previously installed TUI Kit **0.59.0** runtime and
-local wrapping adaptations; they now reside in the shared TUI workspace. The exact dependency
-archive integrity remains in [`package-lock.json`](../../package-lock.json). Both upstream packages
-use the unchanged MIT license retained here: **Copyright (c) 2026 narumiruna**.
+Focused interaction modules live in the shared TUI workspace and use Kit **0.59.0** contracts with
+local wrapping adaptations. Exact dependency archive integrity remains in
+[`package-lock.json`](../../package-lock.json).
 
-Upstream sources:
-
-- <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-plan-mode>
-- <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-tui-kit>
-
-Update deliberately against matching upstream source/version. Preserve workflow closure,
-settings-name and session compatibility, widget/chat/wrapping, TUI-only adapter routing, and
-attribution. Account for Kit contract changes at the shared boundary. Do not replace sources with
-`dist/`, copy the full Kit, patch managed Pi or `node_modules`, or re-enable npm Plan Mode beside
-this extension. Retain [LICENSE](../LICENSE) and the shared workspace's corresponding notices.
+Update deliberately against matching source versions. Preserve workflow closure, settings-name and
+session compatibility, widget/chat/wrapping, and TUI-only adapter routing. Account for Kit contract
+changes at the shared boundary. Do not replace sources with `dist/`, copy the full Kit, patch
+managed Pi or `node_modules`, or re-enable npm Plan Mode beside this extension. Retain
+[LICENSE](../LICENSE) and the shared workspace's corresponding notices.

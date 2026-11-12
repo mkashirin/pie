@@ -86,17 +86,6 @@ discussion, source checking, and English/Russian academic editing. Neither insta
 changes settings by default. Research retrieval uses the connected AlphaXiv MCP when available;
 language-only editing is not a fact-check.
 
-## Limits and trust
-
-These are local extensions, not sandboxes. Language servers run with your permissions; project
-configuration and third-party tools must be trusted. LSP fixes preview by default. HEM replaces
-only the main interactive prompt, not dialogs or a full file editor, and does not promise exact
-Helix/Zed parity. Plan Mode's tool policy does not sandbox opted-in extension tools. Each package's
-README explains its important limitations.
-
-Cloning does not transfer model access, credentials, sessions, or personal settings. Never commit
-account credentials or secrets in configuration.
-
 ## Development
 
 From the bundle root, use `./install.sh --dev` for shared tooling, then `npm run check` for root
@@ -106,7 +95,6 @@ no child installation step. See [development and verification](docs/development.
 
 ## License
 
-Local release **0.1.0**, MIT. Upstream and dependency versions are independent of the bundle
-version. Retain each package's LICENSE and notices, especially
-[Plan provenance](pi-plan/docs/reference.md#provenance-and-updates) and
-[HEM's third-party notices](pi-hem/THIRD_PARTY_NOTICES.md).
+Local release **0.1.0**, MIT. See [LICENSE](LICENSE) and each package's license and notices,
+including [HEM's third-party notices](pi-hem/THIRD_PARTY_NOTICES.md). Dependency versions are
+independent of the bundle version.

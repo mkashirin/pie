@@ -63,21 +63,6 @@ System clipboard operations need `pbcopy`/`pbpaste` on macOS, Wayland `wl-copy`/
 displays, and subprocess failures are errors, not successful destructive cuts. See
 [clipboard requirements](docs/reference.md#clipboard) for platform and replay behavior.
 
-## Important limits
-
-- HEM is not a file/project/IDE editor. It adds no filesystem save/open, LSP, syntax-tree,
-  workspace/pane management, or general shell/Ex command language. Pi's external editor stays a
-  host feature.
-- Normal/select bindings take precedence over overlapping app shortcuts; unhandled keys fall
-  through. Insert-mode app shortcuts generally remain available.
-- A **25 ms Escape ambiguity window** distinguishes terminal sequences. Delayed legacy Alt input
-  can become Escape plus another key; no timing guarantee covers every terminal protocol.
-- Macros and dot replay are **text-only**: no provider requests, clipboard subprocesses,
-  submission, or host viewport effects are replayed.
-- Text objects, the partial digraph table, logical-line rectangles, and unre-based jump offsets do
-  not promise upstream semantics. There is no horizontal viewport. Real-terminal paging, resizing,
-  Escape timing, and clipboard interoperability require target-machine checks.
-
 ## Reference and development
 
 Read the [reference](docs/reference.md) for registers, integration precedence, runtime/package
