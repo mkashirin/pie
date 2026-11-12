@@ -4,7 +4,7 @@
     "useTabs": false,
     "lineWidth": 100,
     "newLineKind": "lf",
-    "includes": ["*.ts", "tests/**/*.ts", "*.json", "README.md"],
+    "includes": ["*.ts", "tests/**/*.ts", "*.json", "README.md", "docs/**/*.md"],
     "excludes": ["node_modules", "package-lock.json", "tests/.fixture-*/**"],
     "plugins": [
         "https://plugins.dprint.dev/typescript-0.96.1.wasm",

@@ -8,6 +8,7 @@ import {
     visibleWidth,
 } from "@earendil-works/pi-tui";
 import { HorizontalRule } from "@narumitw/pi-tui-kit";
+import { formatHintKeys } from "../hints.ts";
 const BRACKETED_PASTE_START = "\u001b[200~";
 const BRACKETED_PASTE_END = "\u001b[201~";
 
@@ -266,7 +267,7 @@ export class QuestionnaireComponent {
         const tabs = [
             ...this.options.questions.map((question, index) => {
                 const label = sanitizeQuestionnaireText(question.header) || `Question ${index + 1}`;
-                const answered = this.answers[index] ? "x " : "";
+                const answered = this.answers[index] ? "✓ " : "";
                 return this.page === index ? `[${answered}${label}]` : `${answered}${label}`;
             }),
             ...(this.hasReviewPage() ? [this.isReviewPage() ? `[${reviewTab}]` : reviewTab] : []),
@@ -304,16 +305,16 @@ export class QuestionnaireComponent {
         lines.push("");
         question.options.forEach((option, index) => {
             const selected = this.selectedOptions[this.page] === index;
-            const cursor = selected ? ">" : " ";
+            const cursor = selected ? "→" : " ";
             const label = `${cursor} ${index + 1}. ${sanitizeQuestionnaireText(option.label)}`;
             const chosen = this.answers[this.page]?.optionIndex === index + 1;
             const description = option.description
                 ? ` - ${sanitizeQuestionnaireText(option.description)}`
                 : "";
             const line = selected
-                ? this.options.theme.fg("accent", `${label}${chosen ? " x" : ""}${description}`)
+                ? this.options.theme.fg("accent", `${label}${chosen ? " ✓" : ""}${description}`)
                 : `${this.options.theme.fg("text", label)}${
-                    chosen ? this.options.theme.fg("success", " x") : ""
+                    chosen ? this.options.theme.fg("success", " ✓") : ""
                 }${description ? this.options.theme.fg("muted", description) : ""}`;
             lines.push(
                 ...hardWrapWithIndent(line, width, visibleWidth(`${cursor} ${index + 1}. `)),
@@ -353,15 +354,15 @@ export class QuestionnaireComponent {
     renderCustomOption(question, width) {
         const customIndex = question.options.length;
         const selected = this.selectedOptions[this.page] === customIndex;
-        const cursor = selected ? ">" : " ";
+        const cursor = selected ? "→" : " ";
         const label = `${cursor} ${customIndex + 1}. ${
             sanitizeQuestionnaireText(this.options.labels.otherOption)
         }`;
         const chosen = this.answers[this.page]?.wasCustom === true;
         const line = selected
-            ? this.options.theme.fg("accent", `${label}${chosen ? " x" : ""}`)
+            ? this.options.theme.fg("accent", `${label}${chosen ? " ✓" : ""}`)
             : `${this.options.theme.fg("text", label)}${
-                chosen ? this.options.theme.fg("success", " x") : ""
+                chosen ? this.options.theme.fg("success", " ✓") : ""
             }`;
         return hardWrapWithIndent(line, width, visibleWidth(`${cursor} ${customIndex + 1}. `));
     }
@@ -382,7 +383,7 @@ export class QuestionnaireComponent {
             const header = sanitizeQuestionnaireText(question.header) || `Question ${index + 1}`;
             const label = `${index + 1}. ${header}`;
             const summary = ` - ${inlineSummary(answer?.answer ?? "Unanswered")}${
-                answer?.note ? ` | ${noteLabel}: ${inlineSummary(answer.note)}` : ""
+                answer?.note ? ` · ${noteLabel}: ${inlineSummary(answer.note)}` : ""
             }`;
             const line = `${this.options.theme.fg("text", label)}${
                 this.options.theme.fg("muted", summary)
@@ -767,7 +768,7 @@ function selectionNavigationKeys(keybindings) {
     const down = keybindings.getKeys("tui.select.down");
     if (up.includes("up") && down.includes("down")) {
         return formatHintKeys([
-            "^v",
+            "↑↓",
             ...up.filter((key) => key !== "up"),
             ...down.filter((key) => key !== "down"),
         ]);
@@ -790,11 +791,11 @@ function questionNavigationKeys(keybindings) {
         keys.push("shift+tab");
     }
     if (left && right) {
-        keys.push("<>");
+        keys.push("←→");
     } else if (left) {
-        keys.push("<");
+        keys.push("←");
     } else if (right) {
-        keys.push(">");
+        keys.push("→");
     }
     return formatHintKeys(keys);
 }
@@ -807,19 +808,6 @@ function noteShortcutAvailable(keybindings) {
         "tui.select.confirm",
         "tui.input.tab",
     ].some((binding) => keybindings.getKeys(binding).includes("n"));
-}
-
-function formatHintKeys(keys) {
-    return [...new Set(keys)].map(formatHintKey).join("/");
-}
-
-function formatHintKey(key) {
-    return key
-        .split("+")
-        .map((part) =>
-            process.platform === "darwin" && part.toLowerCase() === "alt" ? "option" : part
-        )
-        .join("+");
 }
 
 function inlineSummary(value) {

@@ -10,7 +10,8 @@
         "src/**/*.mjs",
         "tests/**/*.mjs",
         "*.json",
-        "README.md"
+        "README.md",
+        "docs/**/*.md"
     ],
     "excludes": ["node_modules", "package-lock.json"],
     "plugins": [

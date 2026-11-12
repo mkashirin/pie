@@ -6,6 +6,7 @@ import { jiti, visibleWidth } from "./helpers.mjs";
 const { initTheme } = await jiti.import("@earendil-works/pi-coding-agent");
 initTheme("dark");
 const chat = await jiti.import("../src/chat.ts");
+const { Markdown } = await jiti.import("@pi-extensions/tui");
 const questions = await jiti.import("../src/question-tool.ts");
 const completion = await jiti.import("../src/completion-tool.ts");
 const theme = { fg: (_role, text) => text, bold: (text) => text };
@@ -45,7 +46,7 @@ test("question calls and answers are Markdown cards, not serialized JSON", () =>
             theme,
         );
         const rendered = text(card, 100);
-        assert.match(rendered, /Plan \| Answers \| answered/u);
+        assert.match(rendered, /Plan · Answers · answered/u);
         assert.match(rendered, /Answer: 1\. Focused source modules/u);
         assert.match(rendered, /including notes/u);
         assert.ok(!rendered.includes("\"cancelled\""));
@@ -71,6 +72,35 @@ test("cards wrap words and long tokens without ellipsis, with resize and invalid
     }
 });
 
+test("retained Plan cards reuse Markdown across redraws and resize, but refresh on invalidate", (t) => {
+    const hosts = [];
+    const render = Markdown.prototype.render;
+    t.mock.method(Markdown.prototype, "render", function(width) {
+        hosts.push(this);
+        return render.call(this, width);
+    });
+    const body = "  # Implementation\n\n```ts\nconst value = 1;\n```\n\n"
+        + "界ordinary\twords\x1b]52;c;hidden\x07\u202e  ";
+    const card = new chat.PlanChatCard("A heading that must still wrap", body, theme, "ready");
+    const first = card.render(20);
+    assert.deepEqual(card.render(20), first);
+    assert.equal(hosts.length, 1);
+    assert.ok(first.slice(0, 2).every((row) => visibleWidth(row) <= 20));
+    card.render(40);
+    card.render(20);
+    assert.equal(hosts.length, 3);
+    assert.ok(hosts.every((host) => host === hosts[0]));
+    for (const width of [NaN, Infinity, -1, 0, 0.9, 1, 2, 3]) {
+        assert.ok(card.render(width).every((row) => visibleWidth(row) <= width));
+    }
+    card.invalidate();
+    const refreshed = card.render(20);
+    assert.notStrictEqual(hosts.at(-1), hosts[0]);
+    assert.deepEqual(refreshed, first);
+    assert.ok(!text(card, 80).includes("hidden"));
+    assert.ok(body.includes("hidden"), "display cleanup does not change the payload");
+});
+
 test("cancelled, partial and completed tool surfaces stay readable and sanitize answer prose", () => {
     const cancelled = questions.planModeQuestionCancelled(
         [question],
@@ -92,7 +122,7 @@ test("cancelled, partial and completed tool surfaces stay readable and sanitize 
         { isPartial: false },
         theme,
     );
-    assert.match(text(complete, 100), /Plan \| ready/u);
+    assert.match(text(complete, 100), /Plan · ready/u);
     assert.match(text(complete, 100), /Keep ordinary words together/u);
     const hostile = questions.planModeQuestionAnswered([question], [{
         header: "Literal heading",

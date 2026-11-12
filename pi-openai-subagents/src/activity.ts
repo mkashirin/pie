@@ -1,4 +1,4 @@
-import { stripTerminalSequences } from "@earendil-works/pi-tui";
+import { inlineText as compactText, sanitizeDisplayText } from "@pi-extensions/tui";
 import type { Profile } from "./config.ts";
 
 export type ActivityStage = "pending" | "running" | "succeeded" | "failed" | "blocked";
@@ -10,12 +10,9 @@ export interface ActivityPreview {
     readonly snippets: readonly { readonly sign: "-" | "+"; readonly text: string }[];
 }
 
-// Plain presentation data only. Never extract assistant thinking, tool output or wrapper scripts.
-export function compactText(value: string) {
-    return stripTerminalSequences(value).replace(/[\u0000-\u001f\u007f-\u009f]/g, " ")
-        .replace(/[\u202a-\u202e\u2066-\u2069]/g, "").replace(/\s+/g, " ").trim();
-}
+export { compactText };
 
+// Plain presentation data only. Never extract assistant thinking, tool output or wrapper scripts.
 const bounded = (value: unknown, max = 240) =>
     typeof value === "string" ? compactText(value.slice(0, 4096)).slice(0, max) : "";
 
@@ -38,7 +35,13 @@ export function activityPreview(
 
     const snippet = (sign: "-" | "+", value: unknown) => {
         if (typeof value !== "string") return;
-        for (const line of value.slice(0, 4096).split(/\r?\n/).slice(0, 2)) {
+        // Sanitize before splitting so multiline terminal-string payloads stay hidden.
+        const display = sanitizeDisplayText(value.slice(0, 4096), {
+            multiline: true,
+            tabs: "space",
+            controls: "space",
+        });
+        for (const line of display.split("\n").slice(0, 2)) {
             snippets.push({ sign, text: bounded(line, 160) || "(empty)" });
         }
     };

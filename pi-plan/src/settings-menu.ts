@@ -1,5 +1,5 @@
 import type { ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu, type RunMenuResult, sanitizeTerminalText } from "./picker-ui.ts";
+import { defineMenu, runMenu, type RunMenuResult, sanitizeTerminalText } from "@pi-extensions/tui";
 import { PLAN_MODE_COMPLETE_TOOL_NAME } from "./completion-tool.ts";
 import {
     type AvailableImplementationModel,

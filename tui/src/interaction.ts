@@ -1,13 +1,13 @@
-// Only Plan Mode's TUI presentation is local; RPC and no-UI dispatch stay upstream.
+// Only TUI presentation is local; RPC and no-UI dispatch stay upstream.
 import {
     runMenu as upstreamRunMenu,
     runQuestionnaire as upstreamRunQuestionnaire,
 } from "@narumitw/pi-tui-kit";
-import { runMenu as wrappedRunMenu } from "./ui/menu.js";
-import { runQuestionnaire as wrappedRunQuestionnaire } from "./ui/questionnaire.js";
+import { runMenu as wrappedRunMenu } from "./interaction/menu.js";
+import { runQuestionnaire as wrappedRunQuestionnaire } from "./interaction/questionnaire.js";
 export { defineMenu, type RunMenuResult, sanitizeTerminalText } from "@narumitw/pi-tui-kit";
 
-// The focused JS renderers implement the pinned Kit contracts at this typed boundary.
+// Keep the pinned boundary explicit for tooling that infers JS instead of using adjacent .d.ts.
 const runTuiMenu = wrappedRunMenu as typeof upstreamRunMenu;
 
 const runTuiQuestionnaire = wrappedRunQuestionnaire as typeof upstreamRunQuestionnaire;

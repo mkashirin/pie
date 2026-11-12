@@ -1,122 +1,96 @@
 # pi-plan
 
-Local release **0.1.0**: a focused, source-based adaptation of `@narumitw/pi-plan-mode` **0.58.3**.
-The local release version is independent of the upstream source and dependency versions. Pi
-discovers the root `index.ts`; implementation lives in `src/`, and regression tests live in
-`tests/`. There is no bundled runtime, generated chunk tree, vendor directory, build step, or
-separate TUI kit project.
+Plan before implementing: explore a project, answer focused questions, review a completed plan,
+then choose whether to implement, save, or export it. This is a source-based adaptation of
+`@narumitw/pi-plan-mode` **0.58.3**, with readable wrapped menus, questionnaires, and chat cards.
 
-## Behavior and compatibility
+The planning workflow retains settings, saved plans, session recovery, tool policies, and
+model/thinking selection for implementation. Local release **0.1.0** is independent of the upstream
+version.
 
-The original planning workflow is retained: `/plan`, questionnaires, completion, tool policies,
-settings, saved plans, export, implementation handoff, model/thinking selection, session recovery,
-mode contracts, workflow ownership, and cancellation. Command/tool names, session identifiers, and
-the persisted **`pi-plan-mode.json`** settings filename are unchanged.
+## Install
 
-The local presentation fixes are also retained:
+Use the [bundle installation](../README.md#install): run `./install.sh` at the bundle root, then
+start Pi or `/reload`. The bundle needs **Node.js 22.19.0+** and Pi's `@earendil-works` host APIs.
+There is no build or child install step.
 
-- Chat tool calls and results use compact, themed Markdown cards rather than raw JSON. Questions,
-  numbered choices, answers, notes, cancellation, and completed plans remain readable on resize.
-  Chat prose wraps at words without ellipsis cuts; oversized chat tokens wrap at graphemes.
-- Displayed proposed/saved/active plans and recovered input honor Pi's `outputPad` setting (`0` or
-  `1`), including changes made in `/settings`. Tool cards retain Pi's native shell margins; the
-  persistent widget remains full-width and independent of transcript padding.
-- Questionnaire number keys immediately choose an answer and advance. The next option number opens
-  Other (free-form). Review still requires Enter; digits in answer/note editors remain ordinary
-  text. Existing arrows, Enter, navigation, and cancellation continue to work.
+Do not load the npm Plan Mode extension alongside this local one. To load only this extension for a
+session after root workspace setup, run from `pi-plan/`:
 
-- Menu labels, descriptions, settings values, questionnaire prompts, review summaries, notes, and
-  custom answers wrap at whitespace. Oversized indivisible tokens are safely ellipsized without
-  altering stored IDs or answers.
-- Selected menus and questionnaires use `→`; selected menu continuations use `│`.
-- Resize recomputes wrapping and menu row budgets. Very short terminals may hide context or
-  continuation rows, prioritizing selection.
-- The persistent widget keeps its separator and wraps rather than truncating; oversized widget
-  tokens fall back to grapheme wrapping.
-- Search/editing inputs keep Pi's cursor scrolling, keybindings, focus, and raw text behavior.
-
-`src/picker-ui.ts` routes only UI-enabled TUI interactions to the local renderers. RPC and
-unsupported/no-UI modes still use the pinned upstream adapters unchanged. The normal
-`@narumitw/pi-tui-kit` dependency also provides navigation, tasks, custom-interaction ownership,
-borders, hints, definitions, and sanitization through its public API. Those helpers are not copied.
-Pi host packages remain peers; no managed release or `node_modules` files are patched.
-
-## Source layout
-
-```text
-pi-plan/
-├── index.ts                 # Thin Pi discovery shim
-├── src/
-│   ├── index.ts             # Factory and existing renderer exports
-│   ├── plan-mode.ts         # Lifecycle registration and atomic workflow state
-│   ├── settings.ts          # Settings validation and queued atomic saves
-│   ├── state.ts             # Persisted session restoration
-│   ├── tool-policy.ts       # Read-only tool and shell policy
-│   ├── presentation.ts      # Persistent widget and plan display
-│   ├── chat.ts              # Markdown transcript cards; model payloads stay unchanged
-│   ├── *-menu.ts            # Plan-specific menu definitions
-│   ├── ...                  # Completion, contracts, handoff, retention, export
-│   ├── picker-ui.ts         # Typed TUI/RPC adapter boundary
-│   └── ui/                  # Only the required JavaScript renderers/interactions
-├── tests/                   # Regression suites and local-package test helpers
-├── LICENSE                  # Original MIT attribution
-├── package.json
-├── tsconfig.json
-├── dprint.json
-└── README.md
+```sh
+pi --no-extensions --extension ./index.ts
 ```
 
-The local menu renderer supports only the screen kinds used by Plan Mode: actions, detail, choice,
-settings, input, and multiselect. Standalone browse/review screens, document formatting, syntax
-highlighting, Mermaid preparation, duplicate RPC runners, and unrelated Kit helpers are not
-included. Questionnaire review remains supported by its own required component. Unused upstream
-development exports/helpers are omitted; the root factory/renderer exports are preserved.
+## Start a planning workflow
 
-The workflow's mutable state deliberately stays in one closure in `plan-mode.ts`, as upstream
-intended, so splitting files cannot bypass atomic session, policy, thinking, or ownership commits.
+Open `/plan` for the interactive menu, or supply a request directly:
 
-## Provenance and updates
+```text
+/plan Explain the current design and propose a safe migration
+```
 
-The typed Plan Mode modules were restored from the published package's original `src/`, not
-reconstructed from generated JavaScript. The npm 0.58.3 archive has SHA-1
-`02e0a9e0a2419fbac0603fb7f56a25900fb364ff` and was recovered from the local npm cache.
+Choose tools **before** starting if needed. While planning, the agent explores and can ask
+structured questions; once the plan is ready, review it before choosing implementation. A normal
+request to “make a plan” does not itself activate this workflow.
 
-The focused UI modules derive from the previously installed `@narumitw/pi-tui-kit` **0.59.0**
-runtime and the existing local wrapping adaptations. Its exact version/archive integrity remains in
-`../package-lock.json`. Both upstream packages use the same unchanged MIT license retained here.
-Upstream sources:
+| Command                     | Purpose                                                                                     |
+| --------------------------- | ------------------------------------------------------------------------------------------- |
+| `/plan`                     | Open the menu for the current planning/saved/implementation state.                          |
+| `/plan start`               | Enable planning without sending a prompt.                                                   |
+| `/plan <request>`           | Start planning with a request.                                                              |
+| `/plan tools`               | Choose the planning tool policy before starting.                                            |
+| `/plan show`                | Display the completed, saved, or active implementation plan.                                |
+| `/plan finalize`            | Ask the agent to complete the plan.                                                         |
+| `/plan implement`           | Start implementation of a completed or saved plan in this session.                          |
+| `/plan save`                | Save the completed plan for later.                                                          |
+| `/plan export [path]`       | Export to Markdown; default `PLAN.md`, without overwriting an existing file.                |
+| `/plan settings`            | Configure thinking, implementation defaults, retention, export path, and optional shortcut. |
+| `/plan exit` or `/plan off` | Leave planning or clear saved/active plan state.                                            |
 
-- <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-plan-mode>
-- <https://github.com/narumiruna/pi-extensions/tree/main/packages/pi-tui-kit>
+Menus also offer a fresh-session implementation handoff where available. Print/JSON modes lack the
+interactive `/plan` menu; use `/plan start` or `/plan <request>`. Some actions, including questions
+and settings, require an interactive TUI or RPC UI.
 
-Update deliberately against the matching upstream source/version, retaining only the required
-modules and accounting for Kit contract changes. Preserve the local widget, wrapping, adapter,
-settings-name, and attribution changes. Do not replace this source tree with `dist/`, copy the full
-Kit, or re-enable the npm Plan Mode extension alongside this one.
+## Answering questions
 
-## Checks and loading
+Use arrows and Enter, or press the displayed option number to choose an answer and advance. The
+next number opens **Other** for a custom answer. Review still requires Enter; digits typed in
+answer/note editors remain ordinary text. Existing Back and cancellation controls remain available.
 
-Install centralized tooling with `npm run setup:dev` from the repository root, then run root `npm
-run check` for all workspaces or `npm run check` from this directory for Plan Mode. All four
-extensions are npm workspaces with one root `package-lock.json`, no child lockfiles, and no child
-development dependencies. Checks require the workspace checkout and root setup.
+Labels, descriptions, prompts, notes, and review summaries wrap at words. Oversized menu tokens may
+be ellipsized for display without altering stored answers or IDs. Chat prose and plans wrap without
+ellipsis cuts. Resizing recomputes layout, but very short terminals may hide context or
+continuations to keep the selected item visible. Selected menu rows use Pi's native `→` marker.
 
-This checks formatting, strict TypeScript for the core/adapter, and regression tests. The UI
-JavaScript is exercised by the runtime harnesses. Root-installed dprint handles formatting; type
-checking uses `tsc --noEmit`, and tests use root-installed jiti and Pi packages. Root development
-dependencies pin `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` to **1.0.0**; no
-managed Pi installation is needed. Runtime host packages remain peers. Use root `npm run format` to
-apply the root and workspace formatting configurations.
+## Settings and safety
 
-All local source follows the workspace style: four spaces, double quotes, parenthesized arrow
-parameters, definition spacing, 100-column formatting, and LF endings. Markdown is wrapped at 99
-columns. Dependencies and the lockfile are excluded from formatting.
+Preferences remain in **`pi-plan-mode.json`** in the Pi agent directory; the local package rename
+does not rename that file. A configured toggle shortcut takes effect after `/reload` or restart;
+there is no default toggle binding. Prefer `/plan settings` over hand-editing settings.
 
-For automatic personal loading, install the workspace bundle following
-[the repository instructions](../README.md), without a duplicate `packages` settings entry. From a
-checkout elsewhere, use `pi --extension ./index.ts` from this directory. Pi loads the TypeScript
-source without a build step. Use `/reload` or restart Pi after changes. Automated checks cover the
-locally installed Pi 1.0.0 loader, core compatibility, wrapping, Unicode, resize, focus, raw
-IDs/text, settings saves/rollback, cancellation, caller routing, and upstream RPC equivalence. They
-do not replace a live terminal check of `/plan` and `/plan settings`, including model/thinking
-selection, tools, questionnaire review, and Back.
+Planning blocks built-in file mutation and limits shell commands, but it is **not a sandbox**.
+Non-built-in tools require user opt-in and can have their own side effects. Custom shell-policy
+exceptions broaden what may execute. Choosing a tool policy does not activate unavailable tools.
+Only start implementation when you intend to permit edits; export itself deliberately writes a new
+Markdown file.
+
+The `plan_mode_question` and `plan_mode_complete` tools are for an **active effective Plan
+contract**, not ordinary planning requests, roadmaps, writing-plans skills, or plan-file work. Tool
+visibility alone does not activate Plan Mode.
+
+## Reference and development
+
+Read the [workflow and execution reference](docs/reference.md) for ownership/cancellation, settings
+persistence, tool contracts, TUI/RPC behavior, verification, and upstream update rules. Generic
+terminal interaction is shared through the private [TUI workspace](../docs/tui.md); Plan-specific
+menus, workflow, chat, and widget stay local.
+
+Use `./install.sh --dev` and `npm run check` from the bundle root. See the
+[development guide](../docs/development.md) for focused checks and manual terminal coverage.
+
+## License and provenance
+
+MIT, **Copyright (c) 2026 narumiruna**. The original [LICENSE](LICENSE) is retained. Plan's typed
+sources derive from upstream **0.58.3**; the focused menu/questionnaire implementation derives from
+TUI Kit **0.59.0**. See [provenance and updates](docs/reference.md#provenance-and-updates) for
+archive identity, upstream links, and attribution constraints.

@@ -10,7 +10,7 @@ function markdown(name, extra = "", body = "Custom instructions") {
 
 test("bundled roles, custom profiles and user/project trust precedence", async (t) => {
     const e = await environment(t);
-    assert.equal(e.config.definitions.size, 6);
+    assert.equal(e.config.definitions.size, 7);
     const user = join(e.agentDir, "pi-openai-subagents/agents");
     const project = join(e.cwd, ".pi/pi-openai-subagents/agents");
     await mkdir(user, { recursive: true });

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
-const { runQuestionnaire } = await jiti.import("../src/picker-ui.ts");
+const { runQuestionnaire } = await jiti.import("@pi-extensions/tui");
 const { runQuestionnaire: upstream } = await jiti.import("@narumitw/pi-tui-kit");
 const { createTuiHarness, createRpcHarness } = await jiti.import("@narumitw/pi-tui-kit/testing");
 const { answerPlanModeQuestions } = await jiti.import("../src/question-tool.ts");
@@ -23,7 +23,7 @@ const texts = (frame) => frame.map(plain);
 function optionRows(frame) {
     const rows = texts(frame);
     return rows.slice(
-        rows.findIndex((line) => line.includes("> 1.")),
+        rows.findIndex((line) => line.includes("→ 1.")),
         rows.findIndex((line) => line.startsWith("   2.")),
     );
 }
@@ -42,7 +42,7 @@ test(
     async () => {
         const { tui, running } = await open();
         assert.deepEqual(optionRows(tui.render()), [
-            " > 1. Keep ordinary",
+            " → 1. Keep ordinary",
             "      words together",
             "      while choosing -",
             "      Helpful details",
@@ -80,7 +80,7 @@ test(
         }, { isCurrent: () => true, isEnabled: () => true });
         await tui.waitForOpen();
         assert.deepEqual(optionRows(tui.render()), [
-            " > 1. Keep ordinary",
+            " → 1. Keep ordinary",
             "      words together",
             "      while choosing -",
             "      Helpful details",

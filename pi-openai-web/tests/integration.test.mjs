@@ -4,16 +4,19 @@ import {
     SessionManager,
     wrapRegisteredTool,
 } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { createJiti } from "jiti";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { Value } from "typebox/value";
-import factory from "../index.ts";
-import { Runtime } from "../src/runtime.ts";
 import { PacketSchema } from "../src/schemas.ts";
+
+const jiti = createJiti(import.meta.url);
+const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { default: factory } = await jiti.import("../index.ts");
+const { Runtime } = await jiti.import("../src/runtime.ts");
 
 const { loadExtensionFromFactory } = await import(
     new URL("core/extensions/loader.js", import.meta.resolve("@earendil-works/pi-coding-agent"))

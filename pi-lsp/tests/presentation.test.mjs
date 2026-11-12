@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { visibleWidth } from "@earendil-works/pi-tui";
-import { renderResult, renderStatus, renderToolCall } from "../src/presentation.ts";
+import { createJiti } from "jiti";
 import { createPacket } from "../src/results.ts";
+
+const jiti = createJiti(import.meta.url);
+const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { renderResult, renderStatus, renderToolCall } = await jiti.import("../src/presentation.ts");
 const theme = { fg: (_color, text) => text };
 test("diagnostic severity colors are independent of successful packet status", () => {
     const packet = createPacket("lsp_diagnostics", "severity");
@@ -83,6 +86,53 @@ test("collapsed diagnostic records flatten multiline messages and bound giant me
     assert.match(rows.join("\n"), /Expand/);
     const expanded = renderResult({ details: packet }, { expanded: true }, theme).render(120);
     assert.ok(expanded.length > rows.length);
+});
+
+test("LSP hard wrapping preserves multiline whitespace, padding and oversized cells", () => {
+    for (const outputPad of [0, 1]) {
+        const view = renderStatus("ab cd\r\n\t界e\u0301\n", { outputPad }, theme);
+        const width = outputPad === 1 ? 5 : 3;
+        const expected = ["ab ", "cd", "   ", " 界", "e\u0301", ""];
+        assert.deepEqual(view.render(width), expected.map((row) => outputPad ? ` ${row} ` : row));
+        assert.deepEqual(view.render(width + 0.9), view.render(width));
+        for (const invalid of [NaN, Infinity, -1, 0, 0.5]) {
+            assert.deepEqual(view.render(invalid), []);
+        }
+    }
+    assert.deepEqual(renderStatus("界😀", { outputPad: 0 }, theme).render(1), ["?", "?"]);
+});
+
+test("LSP sanitizes terminal strings before row styling and re-evaluates the active theme", () => {
+    let prefix = "first";
+    const styled = { fg: (role, text) => `${prefix}:${role}:${text}` };
+    const view = renderStatus("Warning: a\x1b]52;c;hidden\ntext\x07b", { outputPad: 0 }, styled);
+    assert.deepEqual(view.render(80), ["first:warning:Warning: ab"]);
+    prefix = "next";
+    view.invalidate();
+    assert.deepEqual(view.render(80), ["next:warning:Warning: ab"]);
+    for (const text of ["a\x1bPsecret\x1b\\b", "a\u009dsecret\u009cb"]) {
+        assert.deepEqual(renderStatus(text, { outputPad: 0 }, theme).render(80), ["ab"]);
+    }
+    assert.deepEqual(renderStatus("a\x1b]unterminated", { outputPad: 0 }, theme).render(80), ["a"]);
+});
+
+test("truncation and artifacts remain visible without changing diagnostic packets", () => {
+    const packet = createPacket("lsp_diagnostics", "artifact");
+    packet.status = "partial";
+    packet.truncation.text = true;
+    packet.artifacts = [{ kind: "report", path: "/tmp/report.txt", bytes: 100 }];
+    const before = structuredClone(packet);
+    for (const expanded of [false, true]) {
+        const text = renderResult({ details: packet }, { expanded }, theme).render(200).join("\n");
+        assert.match(text, /Output truncated; see artifacts/);
+        assert.match(text, /Artifact: \/tmp\/report.txt/);
+        assert.deepEqual(packet, before);
+    }
+    packet.artifacts = [];
+    assert.match(
+        renderResult({ details: packet }, {}, theme).render(200).join("\n"),
+        /Output truncated; no artifact available/,
+    );
 });
 
 test("safe width bounded views including narrow unicode and output padding", () => {

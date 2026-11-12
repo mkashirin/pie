@@ -1,5 +1,5 @@
 {
-    "name": "pi-local-extensions",
+    "name": "pi-extensions",
     "version": "0.1.0",
     "private": true,
     "description": "Portable Pi extension bundle: Helix editor, OpenAI subagents, multi-account routing, web tools, LSP tools and Plan Mode",
@@ -14,7 +14,8 @@
         "pi-openai-multi",
         "pi-openai-web",
         "pi-plan",
-        "pi-lsp"
+        "pi-lsp",
+        "tui"
     ],
     "scripts": {
         "check:lsp": "npm run check --workspace pi-lsp",
@@ -24,12 +25,9 @@
         "format:check": "dprint check && npm run format:check --workspaces",
         "typecheck": "npm run typecheck --workspaces",
         "test": "node --test tests/*.test.mjs",
-        "audit:ui": "node scripts/ui-symbols.mjs",
-        "smoke": "node scripts/smoke.mjs",
         "check": "dprint check && npm test && npm run check --workspaces"
     },
     "dependencies": {
-        "@narumitw/pi-tui-kit": "0.59.0",
         "cheerio": "1.1.2",
         "ipaddr.js": "2.2.0"
     },

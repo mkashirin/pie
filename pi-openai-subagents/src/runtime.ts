@@ -21,6 +21,8 @@ import {
     capText,
     emptyUsage,
     Ledger,
+    type LiveBatch,
+    type LiveRunResult,
     type Report,
     ReportSchema,
     reportText,
@@ -145,7 +147,7 @@ export class Runtime {
         tasks: Task[],
         ctx: ExtensionToolContext,
         signal?: AbortSignal,
-        update?: (batch: Batch) => void,
+        update?: (batch: LiveBatch) => void,
         subscribeHeartbeat?: SubscribeHeartbeat,
     ): Promise<Batch> {
         const config = this.host.config();
@@ -175,12 +177,20 @@ export class Runtime {
         const activityIds: string[] = [];
         try {
             // Validate every assignment/input/path before reserving or starting any task.
-            const selected = await Promise.all(
-                tasks.map((t) => resolveAssignment(config, settings, t.agent, ctx)),
-            );
-            const paths = await Promise.all(
-                tasks.map((t) => ownership(ctx.cwd, t.writePaths ?? [])),
-            );
+            // Assignments are identical for repeated roles within this batch. Resolve/authenticate
+            // each role once, while independent ownership checks run concurrently.
+            const assignments = new Map<string, ReturnType<typeof resolveAssignment>>();
+            const [selected, paths] = await Promise.all([
+                Promise.all(tasks.map((t) => {
+                    let assignment = assignments.get(t.agent);
+                    if (!assignment) {
+                        assignment = resolveAssignment(config, settings, t.agent, ctx);
+                        assignments.set(t.agent, assignment);
+                    }
+                    return assignment;
+                })),
+                Promise.all(tasks.map((t) => ownership(ctx.cwd, t.writePaths ?? []))),
+            ]);
             const ledger = this.host.ledger();
             const inputs = tasks.map((t) => ledger.inputs(t.inputs ?? []));
             const promptInputs = inputs.map(formatPromptInputs);
@@ -279,13 +289,23 @@ export class Runtime {
             results.forEach((r) => ledger.putRun(r));
             // Start clocks only when scheduler jobs actually run; never persist timestamps.
             const starts = new Map<string, number>();
-            // Coalesce streamed message updates: each partial publish clones every run and its
-            // evidence. Lifecycle/tool transitions and final snapshots remain immediate.
+            // Only metadata belongs in progress: full evidence stays in the ledger/final batch.
+            // Once cleanup has finished, a run is immutable and its frozen projection can be
+            // reused by later heartbeats and siblings' events without cloning its report again.
+            const settled = new Set<string>();
+            const terminalSnapshots = new Map<string, LiveRunResult>();
+            const freeze = (value: object) => {
+                for (const child of Object.values(value)) {
+                    if (child && typeof child === "object") freeze(child);
+                }
+                Object.freeze(value);
+            };
+            // Coalesce streamed updates; lifecycle/tool transitions remain immediate.
             const minEmitIntervalMs = 100;
             let lastEmitAt = 0;
 
             const emit = (force = false) => {
-                if (!publishing) return;
+                if (!publishing || !update) return;
                 const now = Date.now();
                 const remaining = minEmitIntervalMs - (now - lastEmitAt);
                 if (!force && remaining > 0) {
@@ -303,6 +323,8 @@ export class Runtime {
                 }
                 lastEmitAt = now;
                 const snapshots = results.map((r) => {
+                    const cached = terminalSnapshots.get(r.id);
+                    if (cached) return cached;
                     const started = starts.get(r.id);
                     const durationMs = started === undefined
                         ? r.durationMs
@@ -314,11 +336,25 @@ export class Runtime {
                     const preview = r.status === "running"
                         ? this.activities.get(r.id)?.preview
                         : undefined;
-                    return {
-                        ...structuredClone(r),
+                    const { evidence, ...fields } = r;
+                    const snapshot: LiveRunResult = {
+                        ...structuredClone(fields),
+                        evidence: evidence.map((e) => ({
+                            id: e.id,
+                            owner: e.owner,
+                            tool: e.tool,
+                            retrievedAt: e.retrievedAt,
+                            isError: e.isError,
+                            inspection: e.inspection,
+                        })),
                         durationMs,
                         ...(preview ? { activity: freezePreview(preview) } : {}),
                     };
+                    if (settled.has(r.id)) {
+                        freeze(snapshot);
+                        terminalSnapshots.set(r.id, snapshot);
+                    }
+                    return snapshot;
                 });
                 publish({
                     results: snapshots,
@@ -452,7 +488,7 @@ export class Runtime {
                         name: "agent_report",
                         label: "Final agent report",
                         description:
-                            "Finish this isolated task with a truthful structured report. All fields are required. Link checks to supplied input IDs and claims to actual retrieved evidence IDs. This grants no external capability.",
+                            "Finish this isolated task with a truthful structured report. Fill all required fields. Link checks to supplied input IDs and claims to actual retrieved evidence IDs. Optional contextRequests asks the foreground parent for a scoped scout report and ends this run as incomplete; it never delegates or launches tools. This grants no external capability.",
                         parameters: ReportSchema,
                         execute: async (_id, value) => {
                             if (report || childSignal.aborted) {
@@ -524,6 +560,10 @@ export class Runtime {
                                     );
                                 }
                             }
+                            if (value.contextRequests?.length) {
+                                completionIssue ??=
+                                    "Needs scout context requested through contextRequests; foreground coordination required";
+                            }
                             report = value;
                             return {
                                 content: [{
@@ -536,6 +576,8 @@ export class Runtime {
                         },
                     };
                     const profileCore = config.definitions.get(s.definition.profile)?.core ?? "";
+                    // Read at actual start, not batch setup: earlier writers or external edits
+                    // may have changed context files while this task was queued.
                     const contextFiles = loadProjectContextFiles({
                         cwd: ctx.cwd,
                         agentDir: getAgentDir(),
@@ -647,9 +689,11 @@ export class Runtime {
                         child.abort();
                         await child.waitForIdle();
                         this.children.delete(child);
-                        r.reportBytes = Buffer.byteLength(reportText(r));
-                        r.truncated = capText(reportText(r)).truncated;
+                        const text = reportText(r);
+                        r.reportBytes = Buffer.byteLength(text);
+                        r.truncated = capText(text).truncated;
                         ledger.putRun(r);
+                        settled.add(r.id);
                         emit(true);
                     }
                 }).catch((error) => {
@@ -657,6 +701,8 @@ export class Runtime {
                     r.status = ctrl.signal.aborted ? "cancelled" : "failed";
                     r.reason = String(error);
                     ledger.putRun(r);
+                    settled.add(r.id);
+                    terminalSnapshots.delete(r.id);
                     emit(true);
                 })
             ));

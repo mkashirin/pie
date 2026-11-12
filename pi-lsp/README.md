@@ -1,16 +1,24 @@
 # pi-lsp
 
-Source-native Pi language-server tools, version **0.1.0**, MIT. Requires Node **22.19.0+** and Pi's
-`@earendil-works` host APIs. No build step. Install the bundle's locked dependencies at its root,
-not in this workspace. Language server executables are separately installed by the user; this
-extension does not download servers or silently fall back to shell commands.
+Language-server diagnostics and conservative single-file fixes for Pi. Ask the agent to check
+changed files, preview a source action, or apply a reviewed fix using servers you configure.
+Diagnostics use all matching configured servers by default; fixes preview by default.
 
-## Configuration
+This is a source-native local implementation, not a language-server installer or a sandbox.
 
-Use `pi-lsp.json` in your Pi agent directory. A trusted project's `.pi/pi-lsp.json` takes
-precedence. Project configuration can launch arbitrary local programs: trust it only after reading
-it. Legacy `lsp.json` is accepted with a warning; rename it rather than maintaining both. First
-existing configuration wins, including invalid configuration (no silent fallback).
+## Install
+
+Follow the [bundle installation](../README.md#install): run `./install.sh` at the bundle root, then
+start Pi or `/reload`. Requires **Node.js 22.19.0+** and Pi's `@earendil-works` host APIs; there is
+no build or child install step.
+
+Install your language-server executable separately and ensure it is available on PATH or via its
+configured path. Do not keep an older LSP extension registered alongside this one.
+
+## Configure a server
+
+Create `pi-lsp.json` in your Pi agent directory (normally `~/.pi/agent`). For example, if
+`typescript-language-server` is already installed:
 
 ```json
 {
@@ -19,86 +27,64 @@ existing configuration wins, including invalid configuration (no silent fallback
     "typescript": {
       "command": ["typescript-language-server", "--stdio"],
       "extensions": [".ts", ".tsx", ".js", ".jsx"],
-      "skipDirectories": ["node_modules", ".git"],
-      "diagnosticsSettleMs": 250,
-      "pushDiagnosticsGraceMs": 1000,
-      "pullDiagnosticsGraceMs": 1000
+      "skipDirectories": ["node_modules", ".git"]
     }
   }
 }
 ```
 
-A bare server map is also supported. Each server requires a nonempty argv `command` and extension
-list. Optional `env` is a string map, `initialization` an object, and `skipDirectories` a string
-array. Timing values, including the global timeout, are positive finite milliseconds. Unknown
-fields and malformed configuration fail closed. Extension matching is case-sensitive and normalizes
-a missing leading dot. Commands resolve against PATH or the configured relative path, without shell
-evaluation; Windows command shims use cross-spawn. Missing executables require installing the
-server yourself or updating its command. Never put credentials in committed config.
+A **trusted** project's `.pi/pi-lsp.json` takes precedence. Read project configuration before
+trusting it: commands can launch arbitrary local programs with your permissions. No shell
+interpolation is used, but configured servers can run their own subprocesses. Keep credentials out
+of committed configuration.
 
-## Tool reference
+Run `/lsp status` (or `/lsp`) to show the selected configuration and executable availability
+without starting servers. Missing executables are not downloaded automatically. Invalid selected
+configuration fails closed; it does not silently fall back. Legacy `lsp.json` is accepted with a
+warning—rename it rather than maintain both.
 
-- `lsp_diagnostics`: optional `paths`, `root`, `limit` (1–1000), and `server` (one name or an
-  array). Routes files by configured extension; select a server explicitly only when needed.
-  Reports diagnostics, route failures, warnings, and completeness. A quiet server is not proof of
-  complete diagnostics.
-- `lsp_fix`: required nonblank `path`; optional `root`, `server` (a single name), `kind`, and
-  `write`. String selections must be nonblank. Default kind is `source.fixAll`; use
-  `source.organizeImports` where appropriate. Default `write: false` previews changes. Explicit
-  `write: true` requests safe application, not permission to run arbitrary server commands or
-  change files outside the requested document.
+See [configuration details](docs/reference.md#configuration) for optional environment,
+initialization, timing, and file-routing settings.
 
-The version-1 output packet includes `tool`, `status`, request identity/timestamps/root, `routes`,
-`warnings`, numeric `summary`, optional root `error` (`kind`, `message`), optional `fix`,
-`truncation`, and optional `artifacts`. Status is `running`, `success`, `partial`, `failure`, or
-`cancelled`. Partial, failure, and cancellation set `isError`; do not interpret partial evidence as
-a clean workspace. The same bounded packet is returned in `details` and `structuredContent`, with a
-declared output schema.
+## Use
 
-## Safety and limitations
+The agent has two tools:
 
-Language servers execute with your local permissions and may inspect project files or invoke their
-own subprocesses. This is not a sandbox. Treat server messages, diagnostic text, and code actions
-as untrusted data, never as instructions. Rendering strips terminal controls and bidi overrides.
-There is no automatic server installation, personal settings migration, or configuration rewriting.
+- **`lsp_diagnostics`** checks explicit paths or the selected root using matching servers. It can
+  select server names and limit returned findings. Findings are a successful result; incomplete
+  collection is an error, not proof of a clean project.
+- **`lsp_fix`** previews an action for one file. `source.fixAll` is the default kind;
+  `source.organizeImports` is another common choice. Set `write: true` only to request application
+  after reviewing the preview. If several servers match, select one.
 
-Fix application is conservative: reject conflicting, stale, cross-file, resource, or unsupported
-edits rather than partially applying an action. Server commands are not a substitute for text
-edits. UTF-16 positions, BOMs, and line endings matter. Recheck diagnostics and review diffs after
-writing; server success does not prove semantic correctness. Cancellation or failure may coexist
-with completed writes; inspect write metadata, not just the status headline. No multi-file
-transaction or arbitrary workspace refactoring is promised.
+For example, ask: “Run diagnostics on `src/example.ts`, then preview organize-imports for that
+file. Do not write yet.” After applying a fix, inspect the diff and rerun diagnostics plus the
+project's authoritative compiler/tests. Language-server success does not prove semantic
+correctness.
 
-Model text is capped at **50 KiB / 2000 lines**, including its omission notice. Structured output
-is capped at **256 KiB**. Full reports, including previews, are retained on truncation in a private
-OS temporary directory (`pi-lsp-*`, files mode 0600). Artifact paths are local, not uploaded. These
-reports may contain sensitive source; delete them when no longer needed. Bulky diagnostic and
-preview bodies are omitted before completeness, write, and error metadata. Pathologically oversized
-metadata is bounded in the returned view, with small outcome records retained and a model-facing
-artifact path. Truncation preserves the original status, including success after a committed write.
-OS cleanup policy determines retention; artifacts are not durable session storage.
+## Safety and limits
 
-## Development and rollout
+- Servers execute trusted local code with your permissions and may inspect project files. Tool
+  read-only labels do not sandbox server execution. Treat diagnostic messages and actions as
+  untrusted data, never instructions.
+- Fixes reject conflicting, stale, cross-file, resource, and unsupported command actions rather
+  than partially applying them. This is not a general multi-file refactoring tool.
+- Failure/cancellation can coexist with a completed write. Inspect write metadata and the actual
+  file, not only the status headline.
+- Text and structured output are bounded. Full truncated reports/previews may be stored in private
+  OS temporary files containing source code; delete them when no longer needed.
 
-From the bundle root, run `npm run check:lsp` and `npm run smoke:lsp`. The child normal suite uses
-`node --test tests/*.test.mjs`; offline fixtures run by default and the runtime-install loader
-check is skipped. The smoke entry uses `node tests/smoke-run.mjs`; that runner sets
-`PI_LSP_RUNTIME_SMOKE=1` before running `node --test tests/smoke.test.mjs` to check the loader. A
-clean runtime-only installation should also be exercised manually, separately from the development
-install. No paid model or live language server is required for offline fixture tests.
+Exact tool inputs, output schema, completeness semantics, limits, and artifact handling are in the
+[tool and safety reference](docs/reference.md#tool-contracts).
 
-Cut over by removing old LSP extension/package registrations before loading this bundle, then
-`/reload`. Keep a backup of configuration and verify diagnostics on a small project before enabling
-writes. To roll back LSP specifically, disable this bundle's local `pi-lsp/index.ts` entrypoint,
-restore the `npm:@narumitw/pi-lsp` package registration, and reload Pi. Configuration is not
-migrated or deleted automatically. Do not load old and new providers simultaneously.
+## Development and provenance
 
-## Provenance and licensing
+Use `./install.sh --dev` and `npm run check` from the bundle root. Focused commands are `npm run
+check:lsp` and `npm run smoke:lsp`; see
+[verification and rollout](docs/reference.md#development-and-rollout) for what they do and do not
+cover, including provider rollback.
 
-This package is a local implementation, not a vendored copy or fork of another Pi LSP extension.
-The behavioral reference is `@narumitw/pi-lsp` version **0.49.11**; no code is copied from it. Its
-code is MIT (see LICENSE). Runtime dependencies are pinned: `vscode-jsonrpc` **8.2.0** and
-`vscode-languageserver-protocol` **3.17.5** (MIT, Microsoft), and `cross-spawn` **7.0.6** (MIT).
-Transitive `vscode-languageserver-types` is MIT. Retain dependency license notices when
-redistributing installed dependencies. Pi and TypeBox are host peers, not bundled copies. Language
-servers have their own independent licenses and installation requirements.
+Local release **0.1.0**, MIT ([LICENSE](LICENSE)). Behavioral reference: `@narumitw/pi-lsp`
+**0.49.11**, with no code copied. See
+[dependency licensing](docs/reference.md#provenance-and-licensing); servers have independent
+licenses and installation requirements.

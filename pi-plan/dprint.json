@@ -16,7 +16,15 @@
         "textWrap": "always",
         "codeBlock.skipFormat": true
     },
-    "includes": ["index.ts", "src/**/*.ts", "src/**/*.js", "tests/**/*.mjs", "*.json", "README.md"],
+    "includes": [
+        "index.ts",
+        "src/**/*.ts",
+        "src/**/*.js",
+        "tests/**/*.mjs",
+        "*.json",
+        "README.md",
+        "docs/**/*.md"
+    ],
     "excludes": ["node_modules", "package-lock.json"],
     "plugins": [
         "https://plugins.dprint.dev/typescript-0.96.1.wasm",

@@ -23,6 +23,7 @@ test("packed sources load with offline Node WASM and copied runtime dependencies
     try {
         const packed = JSON.parse(execFileSync("npm", [
             "pack",
+            "--offline",
             "--ignore-scripts",
             "--json",
             "--pack-destination",
@@ -50,7 +51,10 @@ test("packed sources load with offline Node WASM and copied runtime dependencies
         assert.ok(!files.some((file) => /(?:lock\.json|tsconfig\.json|dprint\.json)$/.test(file)));
         execFileSync("tar", ["-xzf", path.join(temp, packed.filename), "-C", temp]);
         const manifest = JSON.parse(readFileSync(path.join(temp, "package/package.json"), "utf8"));
-        assert.deepEqual(manifest.dependencies, { rregex: "1.13.5" });
+        assert.deepEqual(manifest.dependencies, {
+            "@pi-extensions/tui": "0.1.0",
+            rregex: "1.13.5",
+        });
         assert.deepEqual(manifest.pi.extensions, ["./index.ts"]);
         const copied = new Set();
         function copyDependency(name, from) {
@@ -69,7 +73,13 @@ test("packed sources load with offline Node WASM and copied runtime dependencies
                 copyDependency(dependency, path.join(source, "package.json"));
             }
         }
-        for (const name of ["jiti", "rregex", ...Object.keys(manifest.peerDependencies)]) {
+        for (
+            const name of [
+                "jiti",
+                ...Object.keys(manifest.dependencies),
+                ...Object.keys(manifest.peerDependencies),
+            ]
+        ) {
             copyDependency(name, path.join(root, "package.json"));
         }
         writeFileSync(

@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu, sanitizeTerminalText } from "./picker-ui.ts";
+import { defineMenu, runMenu, sanitizeTerminalText } from "@pi-extensions/tui";
 import {
     type AvailableImplementationModel,
     findAvailableImplementationModel,

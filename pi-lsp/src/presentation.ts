@@ -1,73 +1,36 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { type Component, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, hardWrapText, sanitizeDisplayText, ThemedText } from "@pi-extensions/tui";
 import { Value } from "typebox/value";
 import { capText, type Packet, PacketSchema, packetText } from "./results.ts";
 
-export function sanitizeControls(text: string): string {
-    return text.replace(/\x1b\][^\x07]*(?:\x07|\x1b\\)/gu, "")
-        .replace(/\x1b\[[0-?]*[ -/]*[@-~]/gu, "")
-        .replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f\u202a-\u202e\u2066-\u2069]/gu, "");
-}
+const diagnosticTextOptions = { multiline: true, tabs: "preserve" } as const;
+
 interface Options {
     expanded?: boolean;
     isPartial?: boolean;
     outputPad?: number;
 }
-class View implements Component {
-    private text: string;
-    private theme: Theme;
-    private color: "error" | "warning" | "success" | "muted" | "toolTitle";
-    private pad: number;
-    constructor(
-        text: string,
-        theme: Theme,
-        color: "error" | "warning" | "success" | "muted" | "toolTitle",
-        pad = 0,
-    ) {
-        this.text = text;
-        this.theme = theme;
-        this.color = color;
-        this.pad = pad;
-    }
-    invalidate() {}
-    render(width: number): string[] {
-        if (!Number.isFinite(width) || width < 1) return [];
-        width = Math.floor(width);
-        const pad = this.pad === 1 && width >= 3 ? " " : "";
-        const budget = width - pad.length * 2;
-        const rows: string[] = [];
-        for (
-            const line of sanitizeControls(this.text).replace(/\t/gu, "    ").split(/\r\n|\r|\n/u)
-        ) {
-            let row = "";
-            let columns = 0;
-            for (
-                const { segment } of new Intl.Segmenter(undefined, { granularity: "grapheme" })
-                    .segment(line)
-            ) {
-                const cell = visibleWidth(segment) > budget ? "?" : segment;
-                const size = visibleWidth(cell);
-                if (columns + size > budget) {
-                    rows.push(row);
-                    row = "";
-                    columns = 0;
-                }
-                row += cell;
-                columns += size;
-            }
-            rows.push(row);
-        }
-        return rows.map((row) => {
-            const color = /: error:/.test(row)
-                ? "error"
-                : /: warning:|^Warning:/.test(row)
-                ? "warning"
-                : /: information:|: hint:/.test(row)
-                ? "muted"
-                : this.color;
-            return pad + this.theme.fg(color, row) + pad;
-        });
-    }
+function diagnosticText(
+    text: string,
+    theme: Theme,
+    color: "error" | "warning" | "success" | "muted" | "toolTitle",
+    outputPad = 0,
+): Component {
+    return new ThemedText(() => sanitizeDisplayText(text, diagnosticTextOptions), {
+        outputPad,
+        // Severity is a display-row policy, independent of the packet outcome color.
+        wrap: (text, width) =>
+            hardWrapText(text, width).map((row) => {
+                const severity = /: error:/.test(row)
+                    ? "error"
+                    : /: warning:|^Warning:/.test(row)
+                    ? "warning"
+                    : /: information:|: hint:/.test(row)
+                    ? "muted"
+                    : color;
+                return theme.fg(severity, row);
+            }),
+    });
 }
 export function renderToolCall(
     tool: string,
@@ -75,7 +38,7 @@ export function renderToolCall(
     theme: Theme,
     _context?: unknown,
 ): Component {
-    return new View(`${tool} ${JSON.stringify(args ?? {})}`, theme, "toolTitle");
+    return diagnosticText(`${tool} ${JSON.stringify(args ?? {})}`, theme, "toolTitle");
 }
 export function renderResult(
     result: { details?: unknown; content?: readonly { type: string; text?: string }[] },
@@ -84,7 +47,7 @@ export function renderResult(
     _context?: unknown,
 ): Component {
     if (!Value.Check(PacketSchema, result.details)) {
-        return new View(
+        return diagnosticText(
             result.content?.map((c) => c.text ?? "").join("\n") ?? "",
             theme,
             "muted",
@@ -109,7 +72,7 @@ export function renderResult(
         let count = 0;
         const diagnostics: string[] = [];
         const shorten = (value: string) => {
-            const flat = sanitizeControls(value).replace(/\s+/gu, " ");
+            const flat = sanitizeDisplayText(value, diagnosticTextOptions).replace(/\s+/gu, " ");
             if (flat.length <= 200) return flat;
             omitted = true;
             return flat.slice(0, 197) + "...";
@@ -165,8 +128,8 @@ export function renderResult(
         );
     }
     for (const artifact of packet.artifacts ?? []) lines.push(`Artifact: ${artifact.path}`);
-    return new View(lines.join("\n"), theme, color, options.outputPad);
+    return diagnosticText(lines.join("\n"), theme, color, options.outputPad);
 }
 export function renderStatus(message: string, options: Options, theme: Theme): Component {
-    return new View(message, theme, "muted", options.outputPad ?? 1);
+    return diagnosticText(message, theme, "muted", options.outputPad ?? 1);
 }

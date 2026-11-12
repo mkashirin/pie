@@ -27,4 +27,11 @@ test("terminal controls are sanitized; narrow terminals do not overflow", () => 
         assert.ok(rows.every((row) => visibleWidth(row) <= width), JSON.stringify(rows));
         assert.equal(rows[0], "─".repeat(width));
     }
+    const narrowRows = renderPlanModeWidget(["界"], theme, 1);
+    assert.equal(narrowRows.at(-1), "?");
+    assert.ok(narrowRows.every((row) => visibleWidth(row) <= 1));
+    for (const width of [NaN, Infinity, -1]) {
+        assert.deepEqual(renderPlanModeWidget(["content"], theme, width), ["", ""]);
+    }
+    assert.equal(sanitizePlanModeWidgetLine("a\x1b]52;c;hidden\x07b\r\nc"), "ab c");
 });

@@ -29,7 +29,7 @@ test("only canonical settings and definitions load, including trusted scopes", a
     let c = await cfg.loadConfiguration(e.agentDir, e.cwd, true);
     assert.deepEqual(c.user, {});
     assert.deepEqual(c.project, {});
-    assert.equal(c.definitions.size, 6);
+    assert.equal(c.definitions.size, 7);
     await json(e.agentDir, canonical, { default: { model: "other/family/model" } });
     c = await cfg.loadConfiguration(e.agentDir, e.cwd, true);
     assert.equal(cfg.assignmentFor(c, {}, "worker").ref, "other/family/model");

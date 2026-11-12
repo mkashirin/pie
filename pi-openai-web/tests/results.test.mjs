@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { sanitizeControls, WebView } from "../src/presentation.ts";
+import { createJiti } from "jiti";
 import {
     aggregateUsage,
     basePacket,
@@ -12,6 +12,8 @@ import {
     toolResult,
 } from "../src/results.ts";
 import { PacketSchema, PageParams, SearchParams } from "../src/schemas.ts";
+
+const { renderPacket } = await createJiti(import.meta.url).import("../src/presentation.ts");
 
 test("TypeBox real output schema and discriminator validation", () => {
     const result = toolResult(
@@ -162,8 +164,7 @@ test("hard text cap, reported usage only, noninteractive sanitized renderer", ()
     const packet = failPacket(basePacket("web_action", "fixture"), "transport", "bad\x1b[31m\x07");
     const result = toolResult(packet);
     assert.ok(Buffer.byteLength(JSON.stringify(result.structuredContent)) <= STRUCTURED_BYTES);
-    const view = new WebView(packet, "", { fg: (_color, text) => text }, true);
+    const view = renderPacket(packet, "", { fg: (_color, text) => text }, true);
     assert.ok(view.render(30).every((line) => !/[\x1b\x07]/u.test(line)));
-    assert.equal(sanitizeControls("a\x1b\x07b"), "ab");
     assert.deepEqual(view.render(0), []);
 });

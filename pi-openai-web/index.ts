@@ -10,7 +10,7 @@ import {
     mutateConfiguration,
     status,
 } from "./src/config.ts";
-import { WebCall, WebStatus, WebView } from "./src/presentation.ts";
+import { renderCall, renderPacket, renderStatus } from "./src/presentation.ts";
 import { basePacket, failPacket, toolResult } from "./src/results.ts";
 import { Runtime } from "./src/runtime.ts";
 import { PacketSchema, PageParams, SearchParams } from "./src/schemas.ts";
@@ -87,7 +87,7 @@ export default function openaiWeb(pi: ExtensionAPI) {
     pi.registerMessageRenderer(
         "pi-openai-web-status",
         (message, options) =>
-            new WebStatus(
+            renderStatus(
                 typeof message.content === "string"
                     ? message.content
                     : JSON.stringify(message.content),
@@ -118,7 +118,7 @@ export default function openaiWeb(pi: ExtensionAPI) {
         result: { details?: unknown; content: { type: string; text?: string }[] },
         options: { expanded: boolean },
         theme: import("@earendil-works/pi-coding-agent").Theme,
-    ) => new WebView(
+    ) => renderPacket(
         result.details,
         result.content.filter((part) => part.type === "text").map((part) => part.text ?? "").join(
             "\n",
@@ -198,7 +198,7 @@ export default function openaiWeb(pi: ExtensionAPI) {
                 return toolResult(packet);
             },
             renderCall(args, theme) {
-                return new WebCall("openai_search", `${args.queries?.length ?? 0} queries`, theme);
+                return renderCall("openai_search", `${args.queries?.length ?? 0} queries`, theme);
             },
             renderResult,
         }));
@@ -253,7 +253,7 @@ export default function openaiWeb(pi: ExtensionAPI) {
                 );
             },
             renderCall(args, theme) {
-                return new WebCall(`web_action ${args.action}`, args.url ?? "", theme);
+                return renderCall(`web_action ${args.action}`, args.url ?? "", theme);
             },
             renderResult,
         }));

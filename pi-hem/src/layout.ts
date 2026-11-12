@@ -1,4 +1,4 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { visibleWidth } from "@pi-extensions/tui";
 import type { HelixBuffer } from "./model.ts";
 export type Row = {
     cells: { text: string; index: number; width: number }[];
@@ -7,7 +7,8 @@ export type Row = {
 };
 /** One coordinate map for drawing, mouse hit testing and visual motion. */
 export function layout(buffer: HelixBuffer, columns: number): Row[] {
-    columns = Math.max(1, columns);
+    // Layout always needs one editing cell, even when no viewport can be drawn.
+    columns = Number.isFinite(columns) ? Math.max(1, Math.floor(columns)) : 1;
     const rows: Row[] = [];
     const cells = buffer.cells;
     let start = 0;

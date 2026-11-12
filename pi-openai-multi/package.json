@@ -23,7 +23,7 @@
         "format": "dprint fmt",
         "format:check": "dprint check"
     },
-    "dependencies": { "proper-lockfile": "^4.1.2" },
+    "dependencies": { "@pi-extensions/tui": "0.1.0", "proper-lockfile": "^4.1.2" },
     "devDependencies": { "@types/proper-lockfile": "^4.1.4", "tsx": "^4.20.0" },
     "peerDependencies": {
         "@earendil-works/pi-ai": "*",

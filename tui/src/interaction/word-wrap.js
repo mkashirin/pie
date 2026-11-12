@@ -11,7 +11,7 @@ export function wrapWords(text, width, style = (line) => line) {
     for (const word of words) {
         // A token is indivisible: a cell/grapheme-safe ellipsis replaces its overflow,
         // never a second fragment on the next row (including URLs, CJK and emoji).
-        const token = visibleWidth(word) > width ? truncateToWidth(word, width, "...") : word;
+        const token = visibleWidth(word) > width ? truncateToWidth(word, width) : word;
         const next = line ? `${line} ${token}` : token;
         if (line && visibleWidth(next) > width) {
             lines.push(style(line));
@@ -30,10 +30,10 @@ export function renderPickerItem(label, description, width, selected, theme, dis
     const style = (text) =>
         selected ? theme.fg("accent", text) : disabled ? theme.fg("dim", text) : text;
 
-    if (width <= inset) return [style(selected ? ">" : " ")];
-    const text = description ? `${label} | ${description}` : label;
+    if (width <= inset) return [style(selected ? "→" : " ")];
+    const text = description ? `${label} · ${description}` : label;
     return wrapWords(text, width - inset).map((line, index) => {
-        const prefix = selected ? index === 0 ? ">" : "│" : " ";
+        const prefix = selected ? index === 0 ? "→" : "│" : " ";
         return style(`${prefix}${inset === 2 ? " " : ""}${line}`);
     });
 }

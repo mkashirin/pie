@@ -1,10 +1,13 @@
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { createJiti } from "jiti";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Value } from "typebox/value";
-import { WebView } from "../src/presentation.ts";
 import { attachPage, attachSearch, basePacket, toolResult } from "../src/results.ts";
 import { PacketSchema } from "../src/schemas.ts";
+
+const jiti = createJiti(import.meta.url);
+const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { renderPacket } = await jiti.import("../src/presentation.ts");
 
 const theme = { fg: (_color, text) => text };
 
@@ -43,7 +46,7 @@ test("expanded structured search renders per-query warnings, native flags, IDs, 
     assert.equal(packet.truncation.structured, false);
     const output = toolResult(packet);
     assert.equal(Value.Check(PacketSchema, output.details), true);
-    const view = new WebView(output.details, "", theme, true);
+    const view = renderPacket(output.details, "", theme, true);
     const rendered = view.render(200).join("\n");
     assert.ok(rendered.includes(`[${packet.results[0].id}]`));
     assert.ok(rendered.includes(`[${packet.evidence[0].id}]`));
@@ -66,7 +69,7 @@ test("expanded structured search renders per-query warnings, native flags, IDs, 
     for (const width of [1, 8, 20, 40]) {
         assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
     }
-    const collapsed = new WebView(packet, "", theme, false).render(200).join("\n");
+    const collapsed = renderPacket(packet, "", theme, false).render(200).join("\n");
     assert.match(collapsed, /Warning:.*Answer truncated/);
     assert.match(collapsed, /Evidence truncated/);
 });
@@ -100,7 +103,7 @@ test("page success counter uses page.ok; incomplete/no-match/native flags disclo
             return text;
         },
     };
-    const success = new WebView(pagePacket(), "", colored, false).render(100).join("\n");
+    const success = renderPacket(pagePacket(), "", colored, false).render(100).join("\n");
     assert.match(success, /success \(1\/1\)/);
     assert.ok(colors.some(([color, text]) => color === "success" && text.includes("1/1")));
     const packet = pagePacket({
@@ -112,7 +115,7 @@ test("page success counter uses page.ok; incomplete/no-match/native flags disclo
     packet.warnings = [];
     for (const expanded of [true, false]) {
         colors.length = 0;
-        const rendered = new WebView(packet, "", colored, expanded).render(200).join("\n");
+        const rendered = renderPacket(packet, "", colored, expanded).render(200).join("\n");
         assert.match(rendered, /Page evidence truncated/);
         assert.match(rendered, /Page incomplete/);
         assert.match(rendered, /absence is not conclusive/);
@@ -120,7 +123,7 @@ test("page success counter uses page.ok; incomplete/no-match/native flags disclo
             !colors.some(([color, text]) => color === "success" && text.includes("web_action")),
         );
     }
-    const completeNoMatch = new WebView(pagePacket({ no_match: true }), "", theme, false).render(
+    const completeNoMatch = renderPacket(pagePacket({ no_match: true }), "", theme, false).render(
         200,
     ).join("\n");
     assert.match(completeNoMatch, /No literal match in extracted text/);
@@ -132,11 +135,11 @@ test("packet output flags disclose without query warnings; unsafe URLs render in
     packet.truncation.structured = true;
     packet.truncation.omissions = ["fixture omission"];
     packet.page.finalUrl = "https://example.com/\x1b]8;;evil\x07";
-    const expanded = new WebView(packet, "", theme, true).render(200).join("\n");
+    const expanded = renderPacket(packet, "", theme, true).render(200).join("\n");
     assert.match(expanded, /Output truncated/);
     assert.match(expanded, /omitted: fixture omission/);
     assert.doesNotMatch(expanded, /[\x1b\x07]/u);
-    const collapsed = new WebView(packet, "", theme, false).render(200).join("\n");
+    const collapsed = renderPacket(packet, "", theme, false).render(200).join("\n");
     assert.match(collapsed, /Warning:.*Partial\/truncated output/);
     assert.match(collapsed, /Evidence omitted/);
 });
@@ -154,7 +157,7 @@ test("collapsed warnings render separately, consolidate fee variants and preserv
     ];
     packet.results[0].warnings = [inspection, fee, retrieval];
     const before = structuredClone(packet);
-    const rendered = new WebView(packet, "", theme, false).render(240);
+    const rendered = renderPacket(packet, "", theme, false).render(240);
     const warnings = rendered.filter((line) => line.startsWith("Warning: "));
     assert.deepEqual(warnings.slice(0, 3), [
         `Warning: ${fee}`,
@@ -166,7 +169,7 @@ test("collapsed warnings render separately, consolidate fee variants and preserv
     assert.doesNotMatch(rendered.join("\n"), /\.;/u);
     assert.ok(warnings.includes("Warning: Answer truncated"));
     assert.deepEqual(packet, before);
-    const view = new WebView(packet, "", theme, false);
+    const view = renderPacket(packet, "", theme, false);
     for (const width of [1, 8, 40]) {
         assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
     }
@@ -186,10 +189,10 @@ test("expanded evidence and collapsed warnings use word boundaries and do not mu
     for (const packet of [page, search]) {
         packet.warnings = [text];
         const before = structuredClone(packet);
-        const expanded = new WebView(packet, "", theme, true).render(12);
+        const expanded = renderPacket(packet, "", theme, true).render(12);
         assert.ok(expanded.includes("alpha beta "));
         assert.ok(expanded.includes("gamma delta"));
-        const collapsed = new WebView(packet, "", theme, false).render(12);
+        const collapsed = renderPacket(packet, "", theme, false).render(12);
         assert.ok(collapsed.includes("Warning: "));
         assert.ok(collapsed.includes("alpha beta "));
         assert.ok([...expanded, ...collapsed].every((line) => visibleWidth(line) <= 12));
@@ -231,20 +234,37 @@ test("invalid or legacy details fall back to text in both display modes", () => 
     ) {
         const before = structuredClone(details);
         for (const expanded of [false, true]) {
-            const view = new WebView(details, "Request failed\x07\u202e", theme, expanded);
+            const view = renderPacket(details, "Request failed\x07\u202e", theme, expanded);
             assert.deepEqual(view.render(80), ["", "Request failed"]);
             assert.deepEqual(view.render(0), []);
             for (const width of [1, 8]) {
                 assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
             }
-            assert.deepEqual(new WebView(details, "", theme, expanded).render(80), []);
+            assert.deepEqual(renderPacket(details, "", theme, expanded).render(80), []);
         }
         assert.deepEqual(details, before);
     }
 });
 
+test("structured evidence sanitization changes only display copies", () => {
+    const packet = pagePacket({
+        excerpts: [{
+            startLine: 10,
+            endLine: 11,
+            text: "before\x1b]52;c;hidden\ntext\x07after\n  next\tcell  ",
+        }],
+        matches: [{ line: 10, column: 7, text: "left\x1bPsecret\x1b\\right" }],
+    });
+    const before = structuredClone(packet);
+    const rendered = renderPacket(packet, "", theme, true).render(200).join("\n");
+    assert.match(rendered, /Lines 10-11:\nbeforeafter\n  next    cell  /);
+    assert.match(rendered, /10:7 leftright/);
+    assert.doesNotMatch(rendered, /hidden|secret|\x07/u);
+    assert.deepEqual(packet, before);
+});
+
 test("fallback controls and Unicode width are sanitized without requiring UI", () => {
-    const view = new WebView(undefined, "界😀\x1b[31m\x07\u2066\nnext\tline", theme, false);
+    const view = renderPacket(undefined, "界😀\x1b[31m\x07\u2066\nnext\tline", theme, false);
     for (const width of [1, 2, 8]) {
         assert.ok(view.render(width).every((line) => visibleWidth(line) <= width));
         // TUI truncation adds trusted ANSI resets; provider escape sequences stay stripped.

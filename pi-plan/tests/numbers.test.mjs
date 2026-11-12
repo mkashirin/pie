@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { jiti } from "./helpers.mjs";
 
-const { runQuestionnaire } = await jiti.import("../src/picker-ui.ts");
+const { runQuestionnaire } = await jiti.import("@pi-extensions/tui");
 const { createTuiHarness } = await jiti.import("@narumitw/pi-tui-kit/testing");
 const question = {
     id: "original:id",

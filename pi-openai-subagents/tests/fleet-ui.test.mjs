@@ -88,13 +88,13 @@ test("lazy clock, queued/running transitions, terminal clocks and merged call/ru
     a.update(batch(row("same"), row("second")));
     assert.equal(f.events[0].options.placement, "aboveEditor");
     assert.equal(f.ticks.size, 1);
-    assert.match(f.lines()[1], /queued \| 0s/);
+    assert.match(f.lines()[1], /queued · 0s/);
     const renderCount = f.renders;
     f.advance(2000);
     assert.equal(f.renders, renderCount + 1);
-    assert.match(f.lines()[1], /queued \| 0s/); // Queue time is not execution time.
+    assert.match(f.lines()[1], /queued · 0s/); // Queue time is not execution time.
     a.update(batch(row("same", "running"), row("second")));
-    assert.match(f.lines()[1], /running \| 0s/);
+    assert.match(f.lines()[1], /running · 0s/);
     b.update(batch(row("same", "running", { lastActivity: "read" })));
     assert.equal(f.lines().length, 4); // Duplicate role AND run ID across different calls survive.
     f.advance(3000);
@@ -105,11 +105,11 @@ test("lazy clock, queued/running transitions, terminal clocks and merged call/ru
         }),
     ));
     a.finish();
-    assert.match(f.lines()[0], /1 calls \| 3 runs/);
-    assert.ok(f.lines().some((line) => /complete \| 2s/.test(line)));
-    assert.ok(f.lines().some((line) => /incomplete \| 1s/.test(line)));
+    assert.match(f.lines()[0], /1 calls · 3 runs/);
+    assert.ok(f.lines().some((line) => /complete · 2s/.test(line)));
+    assert.ok(f.lines().some((line) => /incomplete · 1s/.test(line)));
     f.advance(5000);
-    assert.ok(f.lines().some((line) => /complete \| 2s/.test(line)));
+    assert.ok(f.lines().some((line) => /complete · 2s/.test(line)));
     b.update(batch(row("same", "failed", { durationMs: 9000 })));
     b.finish();
     assert.deepEqual(f.lines(), []);
@@ -183,7 +183,7 @@ test("throwing heartbeat subscribers are disabled once without starving healthy 
             assert.doesNotThrow(() => f.advance(1000));
             assert.equal(failures, 1);
             assert.equal(healthy, 2);
-            assert.match(f.lines()[1], /running \| 3s/);
+            assert.match(f.lines()[1], /running · 3s/);
         }
         assert.doesNotThrow(() => a.finish("cancelled"));
         assert.equal(failures, 1);
@@ -192,7 +192,7 @@ test("throwing heartbeat subscribers are disabled once without starving healthy 
         const frozen = f.lines().find((line) => /cancelled/.test(line));
         f.advance(2000);
         assert.ok(f.lines().includes(frozen));
-        assert.ok(f.lines().some((line) => /running \| [25]s/.test(line)));
+        assert.ok(f.lines().some((line) => /running · [25]s/.test(line)));
         assert.equal(f.ticks.size, 1);
         const refreshCount = healthy;
         unsubscribe();
@@ -383,7 +383,7 @@ test("cancelled rows can remain beside live calls but their elapsed clocks freez
     f.advance(3000);
     a.finish("cancelled");
     f.advance(10000);
-    assert.ok(f.lines().some((line) => /cancelled \| 3s/.test(line)));
+    assert.ok(f.lines().some((line) => /cancelled · 3s/.test(line)));
     unsubscribe();
     unsubscribe();
     b.finish();
@@ -581,11 +581,11 @@ test("shared heartbeat republishes quiet tool cards, respects staggered starts a
         plainTheme,
     );
     assert.deepEqual(card.render(240).slice(0, 3), [
-        "scout | running",
-        "Role: scout | Model: openai/old",
-        "Elapsed: 2s | 0 turns",
+        "scout · running",
+        "Role: scout · Model: openai/old",
+        "Elapsed: 2s · 0 turns",
     ]);
-    assert.ok(h.widgetFrames.at(-1).some((line) => /running \| 2s/.test(line)));
+    assert.ok(h.widgetFrames.at(-1).some((line) => /running · 2s/.test(line)));
     first.release();
     const second = await streams.started(); // Its start is 2300ms after the first, not queue receipt.
     advance(1000);
@@ -614,7 +614,7 @@ test("shared heartbeat republishes quiet tool cards, respects staggered starts a
     advance(2000);
     assert.equal(updatesB.at(-1).details.results[0].durationMs, 2000);
     assert.deepEqual(finalA.map((r) => r.durationMs), [2300, 1000]);
-    assert.ok(h.widgetFrames.at(-1).some((line) => /complete \| 1s/.test(line)));
+    assert.ok(h.widgetFrames.at(-1).some((line) => /complete · 1s/.test(line)));
     third.release();
     assert.equal((await b).result.details.results[0].durationMs, 2000);
     assert.equal(h.widgets.size, 0);
@@ -689,7 +689,7 @@ test("throwing partial onUpdate during idle heartbeat leaves widget and concurre
     assert.doesNotThrow(() => advance(1000));
     assert.equal(publications, disabledCount);
     assert.equal(updates.at(-1).details.results[0].durationMs, 3300);
-    assert.equal(h.widgetFrames.at(-1).filter((line) => /running \| 3s/.test(line)).length, 2);
+    assert.equal(h.widgetFrames.at(-1).filter((line) => /running · 3s/.test(line)).length, 2);
     assert.equal(h.widgets.size, 1); // No aborted model or ownership loss after UI-only failure.
     first.release();
     const resultA = (await a).result.details.results[0];
@@ -697,7 +697,7 @@ test("throwing partial onUpdate during idle heartbeat leaves widget and concurre
     assert.equal(resultA.durationMs, 3300);
     assert.deepEqual(resultA.report.verification, []); // Warning isn't successful verification.
     advance(1000);
-    assert.ok(h.widgetFrames.at(-1).some((line) => /complete \| 3s/.test(line)));
+    assert.ok(h.widgetFrames.at(-1).some((line) => /complete · 3s/.test(line)));
     assert.equal(updates.at(-1).details.results[0].durationMs, 4300);
     second.release([], true);
     const resultB = (await b).result.details.results[0];
@@ -754,8 +754,8 @@ test("real runtime updates fleet without onUpdate, with orchestration off and pa
 
     const lines = () => [...h.widgets.values()].flatMap((c) => c.render(240));
 
-    assert.match(lines()[0], /2 calls \| 2 runs/);
-    assert.equal(lines().filter((line) => /^scout \| running \| \d+s$/.test(line)).length, 2);
+    assert.match(lines()[0], /2 calls · 2 runs/);
+    assert.equal(lines().filter((line) => /^scout · running · \d+s$/.test(line)).length, 2);
     assert.ok(h.widgetFrames.flat().some((line) => /queued/.test(line)));
     assert.ok(h.widgetFrames.flat().some((line) => /running/.test(line)));
     first.release();
@@ -906,7 +906,7 @@ test("absolute tool shell margin stays one; custom info/warning wrapping uses on
         tasks: [{ agent: "scout", task: "Margin" }],
     });
     const inner = definition.renderResult(result.result, { expanded: true }, plainTheme);
-    assert.equal(stripTerminalSequences(inner.render(80)[0]), "scout | complete");
+    assert.equal(stripTerminalSequences(inner.render(80)[0]), "scout · complete");
     const shell = new ToolExecutionComponent(
         "subagents_run",
         "result",
@@ -919,7 +919,7 @@ test("absolute tool shell margin stays one; custom info/warning wrapping uses on
     shell.updateResult(result.result);
     assert.ok(
         shell.render(80).map(stripTerminalSequences).some((line) =>
-            line.trimEnd() === " scout | complete"
+            line.trimEnd() === " scout · complete"
         ),
     );
     assert.equal(result.result.structuredContent.results[0].report.summary, "Task inspected");

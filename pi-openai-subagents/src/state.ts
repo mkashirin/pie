@@ -26,6 +26,14 @@ export const ReportSchema = Type.Object({
         }),
     ),
     limitations: Type.Array(Type.String()),
+    contextRequests: Type.Optional(Type.Array(
+        Type.Object({
+            agent: Type.Literal("scout"),
+            task: Type.String({ minLength: 1 }),
+            reason: Type.String({ minLength: 1 }),
+        }, { additionalProperties: false }),
+        { minItems: 1 },
+    )),
     claims: Type.Array(
         Type.Object({
             claim: Type.String({ minLength: 1 }),
@@ -87,10 +95,18 @@ export interface RunResult {
     reviewRevision: number;
     toolActivity: { tool: string; capability: string; isError: boolean }[];
 }
-// Activity exists only on live snapshot projections, never on ledger RunResult records.
-export type LiveRunResult = RunResult & { activity?: ActivityPreview };
-export interface Batch {
+// Live snapshots carry evidence metadata, never the potentially large retrieval payloads.
+// Activity exists only on these projections, never on ledger RunResult records.
+export type LiveRunResult = Omit<RunResult, "evidence"> & {
+    evidence: Omit<Evidence, "text" | "details">[];
+    activity?: ActivityPreview;
+};
+export interface LiveBatch {
     results: LiveRunResult[];
+    partial: boolean;
+}
+export interface Batch {
+    results: RunResult[];
     partial: boolean;
 }
 export interface ModeState {
@@ -216,7 +232,7 @@ function negativeCheckKind(verdict: Report["checks"][number]["verdict"]): CheckK
 
 function independentReport(run: RunResult) {
     return run.status === "complete" && run.report?.changeStatus === "none"
-        && !run.changed && !run.uncertainShell
+        && !run.report.contextRequests?.length && !run.changed && !run.uncertainShell
         && !run.report.findings.some((f) => f.severity === "blocking");
 }
 
@@ -347,6 +363,19 @@ export class Ledger {
             }
         }
         for (const r of runs) {
+            if (
+                r.report?.contextRequests?.length
+                && !runs.some((next) =>
+                    positions.get(next.id)! > positions.get(r.id)!
+                    && next.agent === r.agent && next.status === "complete"
+                    && next.report && !next.report.contextRequests?.length
+                    && next.inputs.includes(r.id)
+                )
+            ) {
+                gaps.push(
+                    `Context requested by ${r.id} (${r.agent}); arrange the requested scout context and retry with this run ID in inputs, or explain the limitation`,
+                );
+            }
             if (
                 r.profile === "worker"
                 && (r.changed || r.uncertainShell || r.report?.changeStatus === "changed"

@@ -18,6 +18,8 @@
     },
     "includes": [
         "README.md",
+        "AGENTS.md",
+        "docs/**/*.md",
         "skills/**/*.md",
         "package.json",
         "scripts/**/*.mjs",

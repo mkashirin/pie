@@ -3,7 +3,7 @@ import type {
     QuestionnaireAnswer,
     QuestionnaireQuestion,
     RunQuestionnaireResult,
-} from "@narumitw/pi-tui-kit";
+} from "@pi-extensions/tui";
 
 export const PLAN_MODE_QUESTION_TOOL_NAME = "plan_mode_question";
 export const MAX_PLAN_MODE_RESPONSE_LENGTH = 4_000;
@@ -211,7 +211,7 @@ export async function askPlanModeQuestions(
     ctx: ExtensionContext,
     shouldContinue: () => boolean = () => true,
 ): Promise<PlanModeQuestionAnswer[] | undefined> {
-    const { runQuestionnaire, sanitizeTerminalText } = await import("./picker-ui.ts");
+    const { runQuestionnaire, sanitizeTerminalText } = await import("@pi-extensions/tui");
     if (!shouldContinue()) return undefined;
     const runnerQuestions: QuestionnaireQuestion<string>[] = questions.map((question, index) => ({
         id: String(index),

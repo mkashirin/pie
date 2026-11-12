@@ -8,11 +8,12 @@ import {
     getAgentDir,
     type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { sanitizeDisplayText, ThemedText } from "@pi-extensions/tui";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { safeCallback } from "./src/callbacks.ts";
 import { command } from "./src/commands.ts";
+import { normalizeJson } from "./src/json.ts";
 import {
     classifications,
     type Configuration,
@@ -31,12 +32,12 @@ import {
 } from "./src/runtime.ts";
 import {
     addUsage,
-    type Batch,
     capText,
     emptyUsage,
     EVIDENCE_ENTRY,
     initialState,
     Ledger,
+    type LiveBatch,
     reportText,
     restore,
     RUN_ENTRY,
@@ -387,7 +388,7 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
         label: "Subagents",
         exposure: "model-only",
         description:
-            "Run isolated specialists with role policies. By default, children inherit active direct parent tools; task.tools replaces that set with an exact allowlist and can include callable deferred/codemode tools by name. One task is a single run; multiple tasks form a bounded parallel batch. Sequence calls yourself. Parallel workers need disjoint writePaths; supply prior run/evidence IDs in inputs for review/validation. No recursion, background work or tool activation.",
+            "Run isolated specialists with role policies. By default, children inherit active direct parent tools; task.tools replaces that set with an exact allowlist and can include callable deferred/codemode tools by name. One task is a single run; multiple tasks form a bounded parallel batch. Sequence calls yourself. Parallel writers need disjoint writePaths; supply prior run/evidence IDs in inputs for review/validation. Gardener provides optional post-worker cleanup or explicit refactoring with high reasoning by default; pass relevant worker/scout reports and project conventions. A report's contextRequests requires foreground coordination: run the requested scout when appropriate, then retry the original task with request/scout/worker run IDs in inputs, or disclose the limitation. No recursion, background work or tool activation.",
         promptSnippet:
             "subagents_run: delegate scoped specialist tasks with isolated model contexts.",
         parameters: RunSchema,
@@ -430,18 +431,20 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
                     args.tasks,
                     ctx,
                     signal,
-                    (partial) => {
-                        lease.update(partial);
-                        publish({
-                            content: [{
-                                type: "text",
-                                text: partial.results.map((r) =>
-                                    `${r.agent} ${r.status} ${r.model} ${r.lastActivity ?? ""}`
-                                ).join("\n"),
-                            }],
-                            details: partial,
-                        });
-                    },
+                    onUpdate || (ctx.mode === "tui" && ctx.hasUI)
+                        ? (partial) => {
+                            lease.update(partial);
+                            publish({
+                                content: [{
+                                    type: "text",
+                                    text: partial.results.map((r) =>
+                                        `${r.agent} ${r.status} ${r.model} ${r.lastActivity ?? ""}`
+                                    ).join("\n"),
+                                }],
+                                details: partial,
+                            });
+                        }
+                        : undefined,
                     lease.subscribeHeartbeat,
                 );
                 lease.update(batch);
@@ -455,7 +458,13 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
                             text: capText(reportText(r)).text,
                         })),
                         details: batch,
-                        structuredContent: JSON.parse(JSON.stringify(batch)),
+                        // Native JSON is faster for small/object-heavy results. The custom path
+                        // pays off when it can avoid encoding sizable retrieval strings.
+                        structuredContent: batch.results.some((r) =>
+                                r.evidence.some((e) => e.text.length >= 4096)
+                            )
+                            ? normalizeJson(batch)
+                            : JSON.parse(JSON.stringify(batch)),
                         usage,
                         isError: batch.results.every((r) => r.status !== "complete"),
                     };
@@ -468,7 +477,7 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
             }
         },
         renderCall(args, theme) {
-            return new Text(
+            return new ThemedText(() =>
                 theme.fg(
                     "accent",
                     `Subagents: ${
@@ -478,22 +487,18 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
                             ).join(", ") || "..."
                             : "..."
                     }`,
-                ),
-                0,
-                0,
+                )
             );
         },
         renderResult(result, { expanded }, theme) {
-            const batch = result.details as Batch | undefined;
+            const batch = result.details as LiveBatch | undefined;
             if (!Array.isArray(batch?.results)) {
-                return new Text(
+                return new ThemedText(() =>
                     compactText(
                         result.content.filter((p) => p.type === "text").map((p) => p.text).join(
                             "\n",
                         ),
-                    ),
-                    0,
-                    0,
+                    )
                 );
             }
             return new AgentCards(batch.results, theme, expanded);
@@ -509,12 +514,15 @@ export default function OpenAISubagents(pi: ExtensionAPI) {
         pi.registerMessageRenderer(
             type,
             (message, options) =>
-                new Text(
-                    typeof message.content === "string"
-                        ? message.content
-                        : JSON.stringify(message.content),
-                    options?.outputPad ?? 1,
-                    0,
+                new ThemedText(
+                    () =>
+                        sanitizeDisplayText(
+                            typeof message.content === "string"
+                                ? message.content
+                                : JSON.stringify(message.content),
+                            { multiline: true, tabs: "space", controls: "space" },
+                        ),
+                    { outputPad: options?.outputPad ?? 1 },
                 ),
         );
     }

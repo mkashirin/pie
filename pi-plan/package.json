@@ -12,7 +12,7 @@
         "check": "npm run format:check && npm run typecheck && npm test"
     },
     "dependencies": {
-        "@narumitw/pi-tui-kit": "0.59.0"
+        "@pi-extensions/tui": "0.1.0"
     },
     "peerDependencies": {
         "@earendil-works/pi-coding-agent": "*",

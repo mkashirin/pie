@@ -6,13 +6,14 @@ import {
 import {
     Box,
     type Component,
+    escapeMarkdownText,
     Markdown,
+    sanitizeDisplayText,
     Spacer,
-    stripTerminalSequences,
     Text,
-    visibleWidth,
-    wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+    ThemedMarkdown,
+    wrapProse,
+} from "@pi-extensions/tui";
 
 interface ChatResult {
     content: Array<{ type: string; text?: string }>;
@@ -29,13 +30,15 @@ function record(value: unknown): RecordValue {
 }
 
 function clean(value: unknown): string {
-    return stripTerminalSequences(typeof value === "string" ? value : "")
-        .replace(/[\x00-\x09\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu, " ")
-        .trim();
+    return sanitizeDisplayText(typeof value === "string" ? value : "", {
+        multiline: true,
+        tabs: "space",
+        controls: "space",
+    }).trim();
 }
 
 function prose(value: unknown): string {
-    return clean(value).replace(/[\\`*_{}\[\]()<>#+.!|~$-]/gu, "\\$&");
+    return escapeMarkdownText(clean(value));
 }
 
 function contentText(result: ChatResult): string {
@@ -68,7 +71,7 @@ export const renderPlanMessage: MessageRenderer = (message, options, theme) => {
 
 /** Transcript presentation only: payloads, IDs and model-facing JSON remain unchanged. */
 export class PlanChatCard implements Component {
-    private body: Markdown;
+    private body: ThemedMarkdown;
 
     constructor(
         private title: string,
@@ -76,7 +79,8 @@ export class PlanChatCard implements Component {
         private theme: Theme,
         private status: Status,
     ) {
-        this.body = new Markdown(clean(body), 0, 0, getMarkdownTheme());
+        const text = clean(body);
+        this.body = new ThemedMarkdown(() => text, getMarkdownTheme);
     }
 
     invalidate() {
@@ -94,13 +98,8 @@ export class PlanChatCard implements Component {
             ? "muted"
             : "success";
         const heading = this.theme.fg("accent", this.theme.bold(this.title))
-            + " | " + this.theme.fg(color, this.status);
-        return [heading, "", ...this.body.render(columns)].flatMap((line) =>
-            wrapTextWithAnsi(line, columns).map((row) =>
-                // A two-cell grapheme cannot fit a one-column terminal. Never slice it or add dots.
-                visibleWidth(row) > columns ? "?" : row
-            )
-        );
+            + " · " + this.theme.fg(color, this.status);
+        return [...wrapProse(heading, columns), "", ...this.body.render(columns)];
     }
 }
 
@@ -122,7 +121,7 @@ export function renderPlanQuestionCall(args: unknown, theme: Theme) {
             ].filter(Boolean).join("\n\n");
         }).join("\n\n")
         : "_Preparing questions._";
-    return new PlanChatCard("Plan | Questions", body, theme, "waiting");
+    return new PlanChatCard("Plan · Questions", body, theme, "waiting");
 }
 
 export function renderPlanQuestionResult(
@@ -140,7 +139,7 @@ export function renderPlanQuestionResult(
     const details = { ...payload, ...record(result.details) };
     if (details.cancelled === true) {
         const message = prose(details.message) || prose(details.reason) || "Question cancelled.";
-        return new PlanChatCard("Plan | Questions", message, theme, "cancelled");
+        return new PlanChatCard("Plan · Questions", message, theme, "cancelled");
     }
     if (Array.isArray(details.answers)) {
         const body = details.answers.map((value, index) => {
@@ -157,7 +156,7 @@ export function renderPlanQuestionResult(
                     : []),
             ].filter(Boolean).join("\n\n");
         }).join("\n\n");
-        return new PlanChatCard("Plan | Answers", body, theme, "answered");
+        return new PlanChatCard("Plan · Answers", body, theme, "answered");
     }
     const body = options.isPartial
         ? "_Waiting for answers._"
@@ -165,7 +164,7 @@ export function renderPlanQuestionResult(
         ? "_No answers available._"
         : prose(text);
     return new PlanChatCard(
-        "Plan | Questions",
+        "Plan · Questions",
         body,
         theme,
         options.isPartial ? "waiting" : "error",

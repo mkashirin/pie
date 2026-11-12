@@ -1,19 +1,17 @@
 import { getMarkdownTheme, type Theme } from "@earendil-works/pi-coding-agent";
 import {
+    clipText,
     type Component,
+    escapeMarkdownText,
     Markdown,
-    truncateToWidth,
-    visibleWidth,
-    wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+    wrapProse,
+} from "@pi-extensions/tui";
 import { compactText } from "./activity.ts";
-import type { LiveRunResult, RunResult } from "./state.ts";
+import type { LiveRunResult } from "./state.ts";
 
 export const MAX_VISIBLE_RUNS = 8;
 
 const clean = (value: unknown) => compactText(typeof value === "string" ? value : "");
-
-const clipped = (line: string, width: number) => truncateToWidth(line, Math.max(0, width), "...");
 
 /** Shared status colors; the editor fleet returns before any transcript details. No margins. */
 export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false): string[] {
@@ -27,11 +25,11 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
         : "muted";
     const name = theme.fg("accent", clean(run.agent));
     const status = theme.fg(token, clean(run.status));
-    if (fleet) return [`${name} | ${status} | ${seconds}s`];
+    if (fleet) return [`${name} · ${status} · ${seconds}s`];
     const metadata = [
-        `${name} | ${status}`,
-        `Role: ${clean(run.profile)} | Model: ${clean(run.model)}`,
-        `Elapsed: ${seconds}s | ${run.turns ?? 0} turns`,
+        `${name} · ${status}`,
+        `Role: ${clean(run.profile)} · Model: ${clean(run.model)}`,
+        `Elapsed: ${seconds}s · ${run.turns ?? 0} turns`,
     ];
     const preview = run.activity;
     const stageToken = preview?.stage === "failed"
@@ -42,15 +40,15 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
         ? "success"
         : "accent";
     const stageIcon = preview?.stage === "succeeded"
-        ? "x "
+        ? "✓ "
         : preview?.stage === "failed"
-        ? "x "
+        ? "✗ "
         : "";
     const activity = preview
         ? [
-            `${theme.fg(stageToken, stageIcon + clean(preview.stage))} | ${
+            `${theme.fg(stageToken, stageIcon + clean(preview.stage))} · ${
                 clean(preview.action)
-            } | ${clean(preview.tool)}`,
+            } · ${clean(preview.tool)}`,
             ...(preview.focus
                 ? [
                     preview.tool === "bash" || preview.tool === "powershell"
@@ -97,7 +95,7 @@ export function compactRunLines(run: LiveRunResult, theme: Theme, fleet = false)
 
 /** Escaping report prose prevents tool/model data from injecting headings, links or code fences. */
 export function markdownText(value: string) {
-    return clean(value).replace(/[\\`*_{}\[\]()<>#+.!|~$-]/g, "\\$&");
+    return escapeMarkdownText(clean(value));
 }
 
 function sourceLink(value: string) {
@@ -113,7 +111,7 @@ function sourceLink(value: string) {
 }
 
 /** Display only. reportText remains the authoritative model-facing JSON formatter. */
-export function reportMarkdown(run: RunResult): string {
+export function reportMarkdown(run: LiveRunResult): string {
     const md = markdownText;
 
     const list = (items: string[]) =>
@@ -134,6 +132,13 @@ export function reportMarkdown(run: RunResult): string {
                 ? report.findings.map((f) => `- **${md(f.severity)}** - ${md(f.text)}`).join("\n")
                 : "_None reported; not a review certificate._"
         }`,
+        ...(report?.contextRequests?.length
+            ? [`## Context requests\n\n${
+                report.contextRequests.map((request) =>
+                    `- **${md(request.agent)}:** ${md(request.task)}\n  - ${md(request.reason)}`
+                ).join("\n")
+            }`]
+            : []),
         `## Limitations\n\n${list(report?.limitations ?? [])}`,
         `## Claims & sources\n\n${
             report?.claims.length
@@ -190,45 +195,41 @@ export function reportMarkdown(run: RunResult): string {
 }
 
 export class AgentCards implements Component {
-    private reports: (Markdown | undefined)[];
+    private reports: (Markdown | undefined)[] = [];
 
-    constructor(private runs: LiveRunResult[], private theme: Theme, private expanded: boolean) {
-        this.reports = expanded
-            ? runs.map((run) =>
-                run.status === "running" || run.status === "queued"
-                    ? undefined
-                    : new Markdown(reportMarkdown(run), 0, 0, getMarkdownTheme())
-            )
-            : [];
-    }
+    constructor(private runs: LiveRunResult[], private theme: Theme, private expanded: boolean) {}
 
     invalidate() {
-        this.reports.forEach((report) => report?.invalidate());
+        this.reports = [];
     }
 
     render(width: number): string[] {
-        if (width <= 0) return [];
+        width = Number.isFinite(width) ? Math.floor(width) : 0;
+        if (width < 1) return [];
         const lines: string[] = [];
         const visible = this.expanded ? this.runs : this.runs.slice(0, MAX_VISIBLE_RUNS);
         visible.forEach((run, index) => {
             if (index && lines.at(-1) !== "") lines.push("");
             lines.push(
-                ...compactRunLines(run, this.theme).flatMap((line) =>
-                    wrapTextWithAnsi(line, width).map((wrapped) =>
-                        // The wrapper can emit a two-column grapheme at width 1. Use a plain
-                        // placeholder rather than truncation's full reset, preserving the host background.
-                        visibleWidth(wrapped) > width ? ".".repeat(Math.min(3, width)) : wrapped
-                    )
-                ),
+                ...compactRunLines(run, this.theme).flatMap((line) => wrapProse(line, width, ".")),
             );
-            const report = this.reports[index];
+            // Keep expensive settled report parsing/layout cached; the callback Markdown component
+            // deliberately rebuilds each render. Acquire the active Markdown theme only when drawn.
+            const report = this.expanded && run.status !== "running" && run.status !== "queued"
+                ? this.reports[index] ??= new Markdown(
+                    reportMarkdown(run),
+                    0,
+                    0,
+                    getMarkdownTheme(),
+                )
+                : undefined;
             if (report) {
                 if (lines.at(-1) !== "") lines.push("");
-                lines.push(...report.render(width).map((line) => clipped(line, width)));
+                lines.push(...report.render(width).map((line) => clipText(line, width)));
             }
         });
         if (visible.length < this.runs.length) {
-            lines.push(clipped(`+${this.runs.length - visible.length} more runs`, width));
+            lines.push(clipText(`+${this.runs.length - visible.length} more runs`, width));
         }
         return lines;
     }

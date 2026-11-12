@@ -19,3 +19,20 @@ test("layout fits columns one through three", () => {
         assert.ok(layout(b, width).every((r) => r.cells.reduce((n, c) => n + c.width, 0) <= width));
     }
 });
+
+test("invalid and fractional layout widths retain every editing offset and raw grapheme", () => {
+    const b = new HelixBuffer();
+    b.setText("a👩‍💻é\t界\n\x1b[31m");
+    b.moveTo(1);
+    const before = JSON.stringify([b.text, b.selections, b.revision]);
+    const indices = b.cells.flatMap((cell, index) => cell === "\n" ? [] : [index]);
+    for (const width of [NaN, Infinity, -Infinity, -3, 0, 0.9, 1, 1.9, 2.9, 8.9]) {
+        const columns = Number.isFinite(width) ? Math.max(1, Math.floor(width)) : 1;
+        const rows = layout(b, width);
+        assert.deepEqual(rows, layout(b, columns));
+        assert.deepEqual(rows.flatMap((row) => row.cells.map((cell) => cell.index)), indices);
+        assert.ok(rows.every((row) => row.cells.reduce((n, cell) => n + cell.width, 0) <= columns));
+        assert.equal(rows.filter((row) => row.cursor).length, 1);
+        assert.equal(JSON.stringify([b.text, b.selections, b.revision]), before);
+    }
+});

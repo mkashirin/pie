@@ -4,11 +4,13 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
-const { runMenu, defineMenu } = await jiti.import("../src/picker-ui.ts");
+const { runMenu, defineMenu } = await jiti.import("@pi-extensions/tui");
 const { runMenu: upstreamRunMenu } = await jiti.import("@narumitw/pi-tui-kit");
 const { createTuiHarness, createRpcHarness } = await jiti.import("@narumitw/pi-tui-kit/testing");
-const { createMenuScreenComponent } = await jiti.import("../src/ui/menu-components.js");
-const { wrapWords } = await jiti.import("../src/ui/word-wrap.js");
+const { createMenuScreenComponent } = await jiti.import(
+    "../../tui/src/interaction/menu-components.js",
+);
+const { wrapWords } = await jiti.import("../../tui/src/interaction/word-wrap.js");
 const callers = await jiti.import("../src/interactive-ui.ts");
 const identityTheme = { fg: (_color, text) => text, bold: (text) => text };
 const keybindings = { matches: () => false, getKeys: () => [] };
@@ -18,8 +20,8 @@ const text = (frame) => frame.map(plain);
 
 const selected = (frame) => {
     const rows = text(frame);
-    // The search input also has an ASCII > prompt; the selected item follows it.
-    const start = rows.findLastIndex((line) => /^>/u.test(line));
+    // Match the native selection arrow, not the search input's > prompt.
+    const start = rows.findLastIndex((line) => /^→/u.test(line));
     if (start < 0) return [];
     const selectedRows = [rows[start]];
     for (let index = start + 1; index < rows.length && /^│/u.test(rows[index]); index++) {
@@ -98,18 +100,18 @@ test(
                 width: 18,
             });
             assert.deepEqual(selected(tui.render()), [
-                "> Start fresh and",
-                "│ implement | Keep",
+                "→ Start fresh and",
+                "│ implement · Keep",
                 "│ approved plan",
                 "│ intact",
             ]);
             const wide = tui.resize({ width: 70, rows: 60 });
             assert.ok(
-                text(wide).includes("> Start fresh and implement | Keep approved plan intact"),
+                text(wide).includes("→ Start fresh and implement · Keep approved plan intact"),
             );
             assert.deepEqual(selected(tui.resize({ width: 18 })), [
-                "> Start fresh and",
-                "│ implement | Keep",
+                "→ Start fresh and",
+                "│ implement · Keep",
                 "│ approved plan",
                 "│ intact",
             ]);
@@ -168,7 +170,7 @@ test(
                     const frame = resized.render(width);
                     bounded(frame, width, rows);
                     assert.ok(
-                        selected(frame).some((line) => line.startsWith(">")),
+                        selected(frame).some((line) => line.startsWith("→")),
                         `${kind} width ${width} height ${rows}: ${JSON.stringify(frame)}`,
                     );
                     resized.dispose();
@@ -230,7 +232,7 @@ test("empty and no-match statuses wrap at narrow widths with physical-row pinnin
                 assert.deepEqual(lines.slice(start, start + messageRows.length), messageRows);
                 assert.ok(lines.some((line) => line.includes(">")), JSON.stringify(lines));
                 if (kind === "multiSelect") {
-                    assert.deepEqual(selected(frame), ["> Done"]);
+                    assert.deepEqual(selected(frame), ["→ Done"]);
                     assert.ok(lines.includes("Helpful"));
                     assert.ok(lines.includes("words"));
                 }
@@ -241,7 +243,7 @@ test("empty and no-match statuses wrap at narrow widths with physical-row pinnin
                     const frame = component.render(width);
                     bounded(frame, width, rows);
                     if (kind === "multiSelect") {
-                        assert.ok(selected(frame).some((line) => line.startsWith(">")));
+                        assert.ok(selected(frame).some((line) => line.startsWith("→")));
                     }
                     assert.equal(component.focused, true);
                 }
@@ -298,14 +300,14 @@ test("search reminders wrap and retain selected rows and description-tail indexi
             assert.equal(lines[reminderIndex + 1], "search");
             assert.ok(lines.includes("Helpful"));
             assert.ok(lines.includes("words"));
-            assert.ok(selected(frame).some((line) => line.startsWith(">")));
+            assert.ok(selected(frame).some((line) => line.startsWith("→")));
         }
         for (const rows of [4, 5, 8, 12, 24]) {
             tui.terminal.rows = rows;
             for (const width of [1, 2, 3, 8, 12, 18]) {
                 const frame = component.render(width);
                 bounded(frame, width, rows);
-                assert.ok(selected(frame).some((line) => line.startsWith(">")));
+                assert.ok(selected(frame).some((line) => line.startsWith("→")));
             }
         }
         component.dispose();
@@ -410,7 +412,7 @@ test(
             },
         }, { width: 20 });
         assert.deepEqual(selected(tui.render()), [
-            "> Fresh",
+            "→ Fresh",
             "│ implementation",
             "│ model: Same as",
             "│ plan",
@@ -471,7 +473,7 @@ test(
             },
         }, { width: 22 });
         assert.deepEqual(selected(tui.render()), [
-            "> [ ] Read repository",
+            "→ [ ] Read repository",
             "│ metadata and",
             "│ documentation",
         ]);
@@ -485,7 +487,7 @@ test(
         await tui.waitForPending();
         assert.equal(changes.length, 1);
         tui.type("no-matching-toggle");
-        assert.deepEqual(selected(tui.render()), ["> Done - start with", "│ this policy"]);
+        assert.deepEqual(selected(tui.render()), ["→ Done - start with", "│ this policy"]);
         assert.match(text(tui.render()).join("\n"), /No matching items/);
         tui.press("tui.select.confirm");
         await tui.waitForPending();
@@ -696,13 +698,13 @@ test(
             },
         });
         await tui.waitForOpen();
-        assert.deepEqual(selected(tui.render()), ["> [ ] Read repository", "│ metadata and docs"]);
+        assert.deepEqual(selected(tui.render()), ["→ [ ] Read repository", "│ metadata and docs"]);
         tui.send(" ");
         await tui.waitForPending();
         await tui.waitForOpen();
         tui.press("tui.select.down");
         // At 24 columns, the 2-cell selection inset leaves 22 cells for text.
-        assert.deepEqual(selected(tui.render()), ["> Done - start with this", "│ policy"]);
+        assert.deepEqual(selected(tui.render()), ["→ Done - start with this", "│ policy"]);
         tui.press("tui.select.confirm");
         await tui.waitForPending();
         await running;
@@ -728,7 +730,7 @@ test("real Plan Mode main menu uses the questionnaire arrow marker", async () =>
         },
     });
     await tui.waitForOpen();
-    assert.deepEqual(selected(tui.render()), ["> Start Plan mode"]);
+    assert.deepEqual(selected(tui.render()), ["→ Start Plan mode"]);
     tui.press("tui.select.confirm");
     await running;
     assert.equal(started, true);
@@ -783,7 +785,7 @@ test(
     "focused source closure, pinned dependency and original MIT "
         + "attribution remain explicit",
     () => {
-        const root = new URL("../", import.meta.url);
+        const root = new URL("../../tui/", import.meta.url);
         const upstreamPackage = new URL(
             "../package.json",
             import.meta.resolve("@narumitw/pi-tui-kit"),
@@ -838,8 +840,8 @@ test(
         }
 
         walk(new URL("src/", root));
-        const ui = files.filter((file) => file.pathname.includes("/ui/"));
-        assert.equal(ui.length, 10);
+        const ui = files.filter((file) => file.pathname.includes("/interaction/"));
+        assert.equal(ui.filter((file) => file.pathname.endsWith(".js")).length, 10);
         for (const file of ui) {
             assert.ok(
                 !/grok-mermaid|highlight\.js|runDialogMenu|runRpcQuestionnaire/u.test(

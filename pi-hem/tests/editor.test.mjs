@@ -835,6 +835,56 @@ test("secondary line-end cursors render with only one hardware marker", () => {
     e.dispose();
 });
 
+test("invalid/fractional viewports and padding preserve focus, IME and editing offsets", () => {
+    const { e } = editor();
+    e.focused = true;
+    e.setText("a👩‍💻é 界");
+    e.buffer.moveTo(1);
+    const before = JSON.stringify([e.getText(), e.getCursor(), e.buffer.selections]);
+    for (const padding of [NaN, Infinity, -Infinity, -1, 0.5, 1.9, 2, 3, 10]) {
+        e.setPaddingX(padding);
+        for (const width of [NaN, Infinity, -Infinity, -1, 0, 0.9]) {
+            assert.deepEqual(e.render(width), []);
+            assert.equal(
+                e.handleMouse({
+                    type: "click",
+                    button: "left",
+                    x: 0,
+                    y: 1,
+                    width,
+                    height: 10,
+                }),
+                undefined,
+            );
+        }
+        for (const width of [1, 1.9, 2, 3.9, 12.9]) {
+            const rows = e.render(width);
+            assert.deepEqual(rows, e.render(Math.floor(width)));
+            assert.ok(rows.every((row) => visibleWidth(row) <= Math.floor(width)));
+            assert.equal(rows.join("").split(CURSOR_MARKER).length - 1, 1);
+            assert.equal(JSON.stringify([e.getText(), e.getCursor(), e.buffer.selections]), before);
+        }
+    }
+    e.setPaddingX(1.9);
+    e.render(12.9);
+    e.handleMouse({ type: "click", button: "left", x: 2, y: 1, width: 12.9, height: 10 });
+    assert.equal(e.buffer.cursor, 1);
+    assert.equal(e.getText(), "a👩‍💻é 界");
+    e.dispose();
+});
+
+test("feedback is sanitized only for display without leaking terminal-string payloads", () => {
+    const { e } = editor();
+    const message = "界👩‍💻é\x1bPPRIVATE_DCS\x1b\\ safe\x1b]52;c;PRIVATE_OSC\x07\u061c\u202e";
+    e.controller.options.feedback(message);
+    assert.equal(e.controller.status, message);
+    const top = stripTerminalSequences(e.render(120)[0]);
+    assert.match(top, /界👩‍💻é safe/);
+    assert.doesNotMatch(top, /PRIVATE_|\u061c|\u202e/);
+    assert.equal(e.controller.status, message);
+    e.dispose();
+});
+
 test("production lone Escape is emitted after the ambiguity timer", async () => {
     const { e } = editor();
     e.setText("draft");

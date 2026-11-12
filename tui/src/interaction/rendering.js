@@ -1,21 +1,10 @@
 import { stripVTControlCharacters } from "node:util";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { wrapWords } from "./word-wrap.js";
-import {
-    formatInteractionHints as kitInteractionHints,
-    HorizontalRule,
-} from "@narumitw/pi-tui-kit";
+import { HorizontalRule } from "@narumitw/pi-tui-kit";
+import { formatInteractionHints } from "../hints.ts";
 import { replaceTerminalControls, safeMenuText } from "./text.js";
 export { safeMenuText } from "./text.js";
-
-// Adapt vendor-generated chrome, not user/model content or terminal output.
-function formatInteractionHints(keybindings, hints) {
-    return kitInteractionHints(keybindings, hints, { separator: "*" })
-        .replace(/\u2190/gu, "<")
-        .replace(/\u2191/gu, "^")
-        .replace(/\u2192/gu, ">")
-        .replace(/\u2193/gu, "v");
-}
 
 export function actionMenuItemPresentation(item) {
     const label = safeMenuText(item.label);
@@ -50,7 +39,7 @@ export function renderFrame(title, lines, content, destination, width, options, 
     const hintRows = wrapWords(hintText, safeWidth, (text) => options.theme.fg("dim", text));
     const compactFullHintRows = wrapWords(
         layout.compactOverflowText
-            ? `${hintText} * ${safeMenuText(layout.compactOverflowText).trim()}`
+            ? `${hintText} · ${safeMenuText(layout.compactOverflowText).trim()}`
             : hintText,
         safeWidth,
         (text) => options.theme.fg("dim", text),
@@ -247,7 +236,7 @@ function priorityRowIndexes(rows, pinnedRows, priorityTailRows, budget = Number.
 function selectedRowIndex(rows, pinnedRows = 0) {
     const start = Math.max(0, Math.min(rows.length, Math.floor(pinnedRows)));
     const selected = rows.slice(start).findIndex((line) =>
-        /^>/u.test(stripVTControlCharacters(line))
+        /^→/u.test(stripVTControlCharacters(line))
     );
     return selected < 0 ? -1 : start + selected;
 }
@@ -347,7 +336,7 @@ function compactMenuHint(
 
 function hintSegments(hintText) {
     return safeMenuText(hintText)
-        .split(/\s+[*|]\s+/u)
+        .split(/\s+[·•*|]\s+/u)
         .map((segment) => segment.trim())
         .filter(Boolean);
 }
@@ -391,7 +380,7 @@ export function fitCompactHintSegments(segments, width) {
     const safeWidth = Math.max(1, width);
     let result = "";
     for (const segment of segments.map(safeMenuText).filter(Boolean)) {
-        const candidate = result ? `${result} * ${segment}` : segment;
+        const candidate = result ? `${result} · ${segment}` : segment;
         if (visibleWidth(candidate) > safeWidth) {
             continue;
         }

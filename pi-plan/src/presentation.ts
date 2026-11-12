@@ -1,10 +1,9 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { stripTerminalSequences, wrapTextWithAnsi } from "@earendil-works/pi-tui";
+import { sanitizeDisplayText, wrapProse } from "@pi-extensions/tui";
 import type { PlanModeState } from "./state.ts";
 
 const STATUS_KEY = "plan-mode";
 const PLAN_WIDGET_KEY = "plan-mode-plan";
-const BIDI_CONTROLS = /[\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 
 export function updatePlanModeUi(
     ctx: ExtensionContext,
@@ -35,25 +34,19 @@ export function renderPlanModeWidget(
     theme: Theme,
     width: number,
 ): string[] {
-    const renderWidth = Math.max(0, width);
+    const renderWidth = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
     return [
         theme.fg("borderMuted", "─".repeat(renderWidth)),
         ...lines.flatMap((line) =>
             renderWidth > 0
-                ? wrapTextWithAnsi(sanitizePlanModeWidgetLine(line), renderWidth)
+                ? wrapProse(sanitizePlanModeWidgetLine(line), renderWidth)
                 : [""]
         ),
     ];
 }
 
 export function sanitizePlanModeWidgetLine(value: string): string {
-    let text = "";
-    for (const character of stripTerminalSequences(value).replace(BIDI_CONTROLS, "")) {
-        const codePoint = character.codePointAt(0) ?? 0;
-        const isControl = codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
-        text += isControl ? " " : character;
-    }
-    return text;
+    return sanitizeDisplayText(value, { multiline: false, tabs: "space", controls: "space" });
 }
 
 export function clearPlanModeUi(ctx: ExtensionContext) {

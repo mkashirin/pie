@@ -3,7 +3,7 @@ import { constants } from "node:fs";
 import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import type { KeyId } from "@earendil-works/pi-tui";
+import type { KeyId } from "@pi-extensions/tui";
 import {
     type ImplementationModelOverride,
     isPendingImplementationModelIdentifier,

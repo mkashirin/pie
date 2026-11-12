@@ -5,26 +5,21 @@ import {
     type AutocompleteSuggestions,
     CURSOR_MARKER,
     type EditorTheme,
+    sanitizeDisplayText,
     SelectList,
     truncateToWidth,
     type TUI,
     type TuiMouseEvent,
     type TuiMouseEventResult,
     visibleWidth,
-} from "@earendil-works/pi-tui";
+} from "@pi-extensions/tui";
 import { graphemes, HelixBuffer } from "./model.ts";
 import { CommandController } from "./commands.ts";
 import { InputDecoder } from "./input.ts";
 import { bindings as modalBindings, resolveBinding } from "./compatibility.ts";
 import { createClipboard } from "./clipboard.ts";
-import { layout as sharedLayout } from "./layout.ts";
+import { layout as sharedLayout, type Row } from "./layout.ts";
 type Matcher = (text: string, pattern: string) => { start: number; end: number }[];
-
-type Row = {
-    cells: { text: string; index: number; width: number }[];
-    start: number;
-    cursor: boolean;
-};
 
 export class HelixEditor extends CustomEditor {
     readonly buffer = new HelixBuffer();
@@ -33,8 +28,7 @@ export class HelixEditor extends CustomEditor {
         matcher: (text, pattern) => this.matcher?.(text, pattern) ?? [],
         clipboard: createClipboard(),
         feedback: (message) => {
-            // deno-lint-ignore no-control-regex -- Strip terminal control characters from feedback.
-            this.controller.status = message.replace(/[\x00-\x1f\x7f-\x9f]/g, "�");
+            this.controller.status = message;
             if (!this.disposed) this.tui.requestRender();
         },
         changed: () => {
@@ -203,7 +197,7 @@ export class HelixEditor extends CustomEditor {
     }
 
     override setPaddingX(value: number): void {
-        this.padding = Math.min(3, Math.max(0, value));
+        this.padding = Number.isFinite(value) ? Math.min(3, Math.max(0, Math.floor(value))) : 0;
         this.tui.requestRender();
     }
 
@@ -590,7 +584,7 @@ export class HelixEditor extends CustomEditor {
                     && sequence.every((part, i) => binding.keys[i] === part)
                 )
             ) {
-                this.controller.status = `${sequence.join(" ")} …`;
+                this.controller.status = `${sequence.join(" ")} ...`;
                 this.tui.requestRender();
                 return;
             }
@@ -720,6 +714,7 @@ export class HelixEditor extends CustomEditor {
     }
 
     override render(width: number): string[] {
+        width = Number.isFinite(width) ? Math.floor(width) : 0;
         if (width < 1) return [];
         const pad = Math.min(this.padding, Math.floor((width - 1) / 2));
         const columns = Math.max(1, width - 2 * pad - (pad ? 0 : 1));
@@ -741,8 +736,11 @@ export class HelixEditor extends CustomEditor {
             ),
         );
         const top = this.renderTopBorder(width, this.offset);
-        // deno-lint-ignore no-control-regex -- Status must not inject terminal controls.
-        const status = this.controller.status.replace(/[\x00-\x1f\x7f-\x9f]/g, "�");
+        const status = sanitizeDisplayText(this.controller.status, {
+            multiline: false,
+            tabs: "space",
+            controls: "space",
+        });
         const detail = truncateToWidth(status, Math.max(0, width - 32), "");
         const modeLabel = `── ${this.buffer.mode.toUpperCase()}${detail ? ` ${detail}` : ""} ──`;
         // Preserve Pi's working indicator at the left of the top border. Short
@@ -817,14 +815,15 @@ export class HelixEditor extends CustomEditor {
     }
 
     override handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
-        if (event.type !== "click" || event.button !== "left") return undefined;
+        const width = Number.isFinite(event.width) ? Math.floor(event.width) : 0;
+        if (event.type !== "click" || event.button !== "left" || width < 1) return undefined;
         if (this.list && event.y >= this.visibleRows + 2) {
             const result = this.list.handleMouse?.({ ...event, y: event.y - this.visibleRows - 2 });
             if (result) return { ...result, focus: true };
         }
         const row = this.rows[this.offset + event.y - 1];
         if (!row || event.y < 1 || event.y > this.visibleRows) return undefined;
-        let col = Math.min(this.padding, Math.floor((event.width - 1) / 2));
+        let col = Math.min(this.padding, Math.floor((width - 1) / 2));
         let index = row.start;
         for (const item of row.cells) {
             if (event.x < col + item.width) {

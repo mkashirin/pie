@@ -103,7 +103,7 @@ test("worker previews arrive before tool completion, are immutable, and never en
     assert.doesNotMatch(card.render(240).join("\n"), /No final report/);
     const fleet = h.widgetFrames.at(-1);
     assert.equal(fleet.length, 2);
-    assert.match(fleet[1], /^worker \| running \| \d+s$/);
+    assert.match(fleet[1], /^worker · running · \d+s$/);
     assert.doesNotMatch(fleet.join("\n"), /src\/a\.ts|PRIVATE_|proposed|edit/);
     release.resolve();
     const final = (await pending).result;
@@ -113,7 +113,7 @@ test("worker previews arrive before tool completion, are immutable, and never en
     assert.match(
         h.tools.get("subagents_run").renderResult(success, { isPartial: true }, theme).render(240)
             .join("\n"),
-        /x succeeded/,
+        /✓ succeeded/,
     );
     assert.equal(final.details.results[0].changed, true); // Existing mutation accounting is preserved.
     for (const value of [final, h.entries]) {
@@ -126,12 +126,13 @@ test("worker previews arrive before tool completion, are immutable, and never en
     assert.doesNotMatch(state.reportText(completed), /PRIVATE_|activity|snippets/);
     let input;
     h.ctx.modelRegistry.streamSimple = (m, c) => {
-        input = c.messages[0].content;
+        input = c.messages.filter((message) => message.role === "user").at(-1)?.content;
         return stream(m, [call("agent_report", report())]);
     };
     await h.execute("subagents_run", {
         tasks: [{ agent: "scout", task: "Inspect prior run", inputs: [completed.id] }],
     });
+    assert.ok(input, "inspect the task/report handoff, not the system instructions");
     assert.doesNotMatch(JSON.stringify(input), /PRIVATE_|activity|snippets/);
 });
 
@@ -184,7 +185,7 @@ test("failure, thrown execution, parent veto and ownership denial retain honest 
             const rendered = h.tools.get("subagents_run").renderResult(terminal, {
                 isPartial: true,
             }, theme).render(240).join("\n");
-            assert.match(rendered, kind === "veto" || kind === "scope" ? /blocked/ : /x failed/);
+            assert.match(rendered, kind === "veto" || kind === "scope" ? /blocked/ : /✗ failed/);
             assert.doesNotMatch(rendered, /✓/);
             assert.equal(executed, kind === "veto" || kind === "scope" ? 0 : 1);
             assert.equal(final.result.details.results[0].changed, executed > 0);
@@ -369,15 +370,15 @@ test("edit/write snippets have muted frames and no trailing child blank in live 
         const [stage, prefix, token] of [
             ["pending", "", "accent"],
             ["running", "", "accent"],
-            ["succeeded", "x ", "success"],
-            ["failed", "x ", "error"],
+            ["succeeded", "✓ ", "success"],
+            ["failed", "✗ ", "error"],
             ["blocked", "", "warning"],
         ]
     ) {
         // Outcome glyphs also apply to tools without snippets, not only worker mutations.
         const preview = activity.activityPreview("scout", "read", { path: "a.ts" }, stage);
         const lines = presentation.compactRunLines(run({ activity: preview }), themed);
-        assert.equal(lines[3], `${prefix}${stage} | read focus | read`);
+        assert.equal(lines[3], `${prefix}${stage} · read focus · read`);
         assert.ok(
             colors.some(([color, value]) => color === token && value === `${prefix}${stage}`),
         );
@@ -486,7 +487,7 @@ test("fleet and chat headers use plain names and colored status words without ro
                     durationMs: seconds * 1000,
                 });
                 const before = JSON.stringify(r);
-                const header = `${r.agent} | ${status}`;
+                const header = `${r.agent} · ${status}`;
                 const colors = [];
                 const themed = {
                     bold: (value) => value,
@@ -501,13 +502,13 @@ test("fleet and chat headers use plain names and colored status words without ro
                     () => {},
                 ).render(240).map(stripTerminalSequences);
                 assert.equal(fleet.length, 2);
-                assert.equal(fleet[1], `${r.agent} | ${status} | ${seconds}s`);
+                assert.equal(fleet[1], `${r.agent} · ${status} · ${seconds}s`);
                 for (const expanded of [false, true]) {
                     const card = new presentation.AgentCards([r], themed, expanded);
                     assert.deepEqual(card.render(240).slice(0, 3).map(stripTerminalSequences), [
                         header,
-                        `Role: ${profile} | Model: x/y`,
-                        `Elapsed: ${seconds}s | 2 turns`,
+                        `Role: ${profile} · Model: x/y`,
+                        `Elapsed: ${seconds}s · 2 turns`,
                     ]);
                 }
                 assert.ok(colors.some(([color, text]) => color === "accent" && text === r.agent));
@@ -568,11 +569,11 @@ test("controls, Markdown injection, Unicode, widths, themes and elapsed time are
     const live = run({ status: "running", durationMs: 0 });
     assert.equal(
         presentation.compactRunLines(live, theme)[2],
-        "Elapsed: 0s | 2 turns",
+        "Elapsed: 0s · 2 turns",
     );
     assert.equal(
         presentation.compactRunLines({ ...live, durationMs: 1000 }, theme)[2],
-        "Elapsed: 1s | 2 turns",
+        "Elapsed: 1s · 2 turns",
     );
     assert.deepEqual(
         presentation.compactRunLines(r, theme),
@@ -608,16 +609,16 @@ test("multiline chat preserves bounded long metadata, paths, commands, queries a
             const before = JSON.stringify(r);
             const logical = presentation.compactRunLines(r, theme);
             assert.deepEqual(logical.slice(0, 5), [
-                `${name} | complete`,
-                `Role: ${profile} | Model: ${model}`,
-                "Elapsed: 2s | 2 turns",
+                `${name} · complete`,
+                `Role: ${profile} · Model: ${model}`,
+                "Elapsed: 2s · 2 turns",
                 `${
                     stage === "succeeded"
-                        ? "x "
+                        ? "✓ "
                         : stage === "failed"
-                        ? "x "
+                        ? "✗ "
                         : ""
-                }${stage} | ${preview.action} | ${toolName}`,
+                }${stage} · ${preview.action} · ${toolName}`,
                 toolName === "bash"
                     ? `$ ${preview.focus}`
                     : ["read", "edit"].includes(toolName)
@@ -743,6 +744,205 @@ test("final reports without live activity and missing details use readable, safe
     assert.match(presentation.reportMarkdown(r), /completion does not imply independent review/);
 });
 
+test("shared display sanitization hides terminal strings without altering activity bounds or inputs", () => {
+    const text = "界👩‍💻é\x1bPPRIVATE_DCS\x1b\\\x1b]52;c;PRIVATE_OSC\x07\u061c\u200e\u202e\n safe";
+    assert.equal(activity.compactText(text), "界👩‍💻é safe");
+    assert.equal(activity.compactText("safe\x1b]unterminated PRIVATE_OSC"), "safe");
+    const args = {
+        path: text,
+        edits: [{ oldText: text + "x".repeat(10000), newText: text }],
+    };
+    const before = JSON.stringify(args);
+    const preview = activity.activityPreview("worker", "edit", args, "pending");
+    assert.ok(preview.focus.length <= 240);
+    assert.ok(preview.snippets.every((snippet) => snippet.text.length <= 160));
+    assert.doesNotMatch(JSON.stringify(preview), /PRIVATE_|\u061c|\u200e|\u202e/);
+    assert.equal(JSON.stringify(args), before);
+});
+
+test("snippet extraction removes whole multiline terminal strings before selecting rows", () => {
+    const strings = [
+        ["OSC/BEL", "\x1b]52;c;", "\x07"],
+        ["OSC/ST", "\x1b]52;c;", "\x1b\\"],
+        ["DCS/ST", "\x1bP", "\x1b\\"],
+        ["C1 OSC/ST", "\u009d52;c;", "\u009c"],
+        ["C1 DCS/ST", "\u0090", "\u009c"],
+    ];
+    for (const separator of ["\n", "\r\n", "\r", "\u0085", "\u2028", "\u2029"]) {
+        for (const [name, start, end] of strings) {
+            for (const terminated of [true, false]) {
+                const label = `${name} ${JSON.stringify(separator)} terminated=${terminated}`;
+                const text = `before${start}HIDDEN_FIRST${separator}HIDDEN_SECOND`
+                    + (terminated
+                        ? `${end}after${separator}\t ordinary\tline ${separator}third`
+                        : "");
+                const expected = terminated ? ["beforeafter", "ordinary line"] : ["before"];
+                for (const toolName of ["edit", "write"]) {
+                    const args = Object.freeze({
+                        path: "a.ts",
+                        oldText: text,
+                        newText: text,
+                        content: text,
+                    });
+                    const before = JSON.stringify(args);
+                    const preview = activity.activityPreview("worker", toolName, args, "pending");
+                    assert.deepEqual(
+                        preview.snippets,
+                        (toolName === "edit" ? ["-", "+"] : ["+"]).flatMap((sign) =>
+                            expected.map((text) => ({ sign, text }))
+                        ),
+                        label,
+                    );
+                    assert.doesNotMatch(JSON.stringify(preview), /HIDDEN_|third/, label);
+                    assert.equal(JSON.stringify(args), before, label);
+                    assert.ok(Object.isFrozen(preview));
+                    assert.ok(Object.isFrozen(preview.snippets));
+                    assert.ok(preview.snippets.every(Object.isFrozen));
+                }
+            }
+        }
+    }
+});
+
+test("sanitized snippets preserve empty rows, ordinary whitespace and preview limits", () => {
+    for (const separator of ["\n", "\r\n", "\r", "\u0085", "\u2028", "\u2029"]) {
+        for (
+            const [content, expected] of [
+                ["", ["(empty)"]],
+                [`\t ${separator} one\t two ${separator}third`, ["(empty)", "one two"]],
+                [`one${separator}${separator}third`, ["one", "(empty)"]],
+                [`one${separator}`, ["one", "(empty)"]],
+                [`${"x".repeat(200)}${separator}${"y".repeat(200)}${separator}third`, [
+                    "x".repeat(160),
+                    "y".repeat(160),
+                ]],
+            ]
+        ) {
+            const args = { content };
+            const before = JSON.stringify(args);
+            const preview = activity.activityPreview("worker", "write", args, "pending");
+            assert.deepEqual(preview.snippets.map((s) => s.text), expected);
+            assert.equal(JSON.stringify(args), before);
+        }
+    }
+});
+
+test("snippet sanitization keeps the 4096 input bound and discards truncated terminal tails", () => {
+    for (const start of ["\x1b]52;c;", "\x1bP", "\u009d", "\u0090"]) {
+        const prefix = `before${start}HIDDEN_FIRST\nHIDDEN_SECOND`;
+        const text = prefix + "x".repeat(4096 - prefix.length) + "\x1b\\OUTSIDE_BOUND";
+        const args = { oldText: text, newText: text };
+        const before = JSON.stringify(args);
+        const preview = activity.activityPreview("worker", "edit", args, "pending");
+        assert.deepEqual(preview.snippets, [
+            { sign: "-", text: "before" },
+            { sign: "+", text: "before" },
+        ]);
+        assert.equal(JSON.stringify(args), before);
+    }
+    const preview = activity.activityPreview("worker", "write", {
+        content: "first\n" + " ".repeat(4096 - 6) + "OUTSIDE_BOUND",
+    }, "pending");
+    assert.deepEqual(preview.snippets, [
+        { sign: "+", text: "first" },
+        { sign: "+", text: "(empty)" },
+    ]);
+});
+
+test("cards and fleet normalize invalid/fractional widths without modifying domain packets", () => {
+    initTheme("dark");
+    const r = run({ agent: "界👩‍💻é worker" });
+    const before = JSON.stringify(r);
+    const components = [
+        new presentation.AgentCards([r], theme, false),
+        new presentation.AgentCards([r], theme, true),
+        new ui.FleetComponent(
+            () => [{ live: true, rows: new Map([[r.id, r]]) }],
+            theme,
+            () => {},
+        ),
+    ];
+    for (const component of components) {
+        for (const width of [NaN, Infinity, -Infinity, -1, 0, 0.9]) {
+            assert.deepEqual(component.render(width), []);
+        }
+        for (const width of [1, 1.9, 2.9, 3.9, 20.9, 80.9]) {
+            const rows = component.render(width);
+            assert.deepEqual(rows, component.render(Math.floor(width)));
+            assert.ok(rows.every((row) => visibleWidth(row) <= Math.floor(width)));
+        }
+    }
+    assert.equal(JSON.stringify(r), before);
+});
+
+test("settled Markdown is lazy and cached across renders, and rebuilt with the active theme", () => {
+    initTheme("dark");
+    let reads = 0;
+    const r = run({ report: report(), lastActivity: "finished" });
+    Object.defineProperty(r.report, "summary", {
+        get() {
+            reads++;
+            return "CACHED_SUMMARY";
+        },
+    });
+    const card = new presentation.AgentCards([r], theme, true);
+    assert.equal(reads, 0);
+    assert.deepEqual(card.render(NaN), []);
+    assert.equal(reads, 0);
+    const first = card.render(80);
+    assert.equal(reads, 1);
+    assert.match(stripTerminalSequences(first.join("\n")), /CACHED_SUMMARY/);
+    assert.deepEqual(card.render(80), first);
+    card.render(100);
+    assert.equal(reads, 1, "width changes reuse the report structure and host Markdown component");
+    initTheme("light");
+    card.invalidate();
+    const changed = card.render(80);
+    assert.equal(reads, 2);
+    const fresh = new presentation.AgentCards([r], theme, true).render(80);
+    assert.deepEqual(changed, fresh);
+    card.render(80);
+    assert.equal(reads, 3, "subsequent draws retain the rebuilt cache");
+    initTheme("dark");
+});
+
+test("native tool/message adapters use active themes, width-safe rows and display-only sanitization", async (t) => {
+    const h = await harness(t);
+    const fg = { fg: (_token, text) => `\x1b[31m${text}\x1b[39m` };
+    const args = { tasks: [{ agent: "界👩‍💻é\x1bPPRIVATE_DCS\x1b\\" }] };
+    const before = JSON.stringify(args);
+    const call = h.tools.get("subagents_run").renderCall(args, fg);
+    const first = call.render(80);
+    fg.fg = (_token, text) => `\x1b[32m${text}\x1b[39m`;
+    call.invalidate();
+    assert.notDeepEqual(call.render(80), first);
+    assert.equal(JSON.stringify(args), before);
+    const content = "界👩‍💻é\x1b]52;c;PRIVATE_OSC\x07\u202e\nnext line";
+    for (const renderer of h.renderers.values()) {
+        for (const outputPad of [0, 1]) {
+            const message = { content };
+            const component = renderer(message, { outputPad });
+            for (const width of [NaN, Infinity, -1, 0, 0.9, 1, 2, 3, 8.9, 80]) {
+                const rows = component.render(width);
+                if (!Number.isFinite(width) || width < 1) assert.deepEqual(rows, []);
+                else assert.ok(rows.every((row) => visibleWidth(row) <= Math.floor(width)));
+                assert.doesNotMatch(rows.join("\n"), /PRIVATE_|\u202e/);
+                if (width === 80) {
+                    assert.match(rows.join("\n"), /界👩‍💻é/);
+                    assert.equal(rows[0].startsWith(" "), outputPad === 1);
+                }
+            }
+            assert.equal(message.content, content);
+        }
+    }
+    for (const width of [NaN, Infinity, -1, 0, 0.9, 1, 2, 8.9, 80]) {
+        const rows = call.render(width);
+        if (!Number.isFinite(width) || width < 1) assert.deepEqual(rows, []);
+        else assert.ok(rows.every((row) => visibleWidth(row) <= Math.floor(width)));
+        assert.doesNotMatch(rows.join("\n"), /PRIVATE_DCS/);
+    }
+});
+
 test("fleet retains eight status-only rows, active priority and overflow without margin", () => {
     let component;
     const manager = new ui.FleetUI({ everySecond: () => () => {} });
@@ -788,13 +988,13 @@ test("fleet retains eight status-only rows, active priority and overflow without
             assert.match(plain[0], /^Agents.*\+4 more/);
             assert.equal(plain.filter((line) => /^worker-/.test(line)).length, 8);
             assert.deepEqual(plain.slice(1, 4), [
-                "worker-9 | running | 2s",
-                "worker-10 | running | 2s",
-                "worker-11 | running | 2s",
+                "worker-9 · running · 2s",
+                "worker-10 · running · 2s",
+                "worker-11 · running · 2s",
             ]); // Active runs outrank settled overflow.
             assert.deepEqual(
                 plain.slice(4),
-                Array.from({ length: 5 }, (_, i) => `worker-${i} | complete | 2s`),
+                Array.from({ length: 5 }, (_, i) => `worker-${i} · complete · 2s`),
             );
             assert.doesNotMatch(
                 plain.join("\n"),

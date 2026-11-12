@@ -1,9 +1,9 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { type Component, truncateToWidth } from "@earendil-works/pi-tui";
+import { clipText, type Component } from "@pi-extensions/tui";
 import { compactText, freezePreview } from "./activity.ts";
 import { safeCallback, warnCallbackFailure } from "./callbacks.ts";
 import { compactRunLines, MAX_VISIBLE_RUNS } from "./presentation.ts";
-import type { Batch, LiveRunResult, RunStatus } from "./state.ts";
+import type { LiveBatch, LiveRunResult, RunStatus } from "./state.ts";
 
 export { compactText } from "./activity.ts";
 
@@ -29,7 +29,7 @@ const clock: FleetClock = {
     },
 };
 export interface FleetLease {
-    update(batch: Batch): void;
+    update(batch: LiveBatch): void;
     finish(status?: "failed" | "cancelled"): void;
     subscribeHeartbeat(refresh: () => void): () => void;
 }
@@ -50,7 +50,8 @@ export class FleetComponent implements Component {
     }
 
     render(width: number) {
-        if (width <= 0) return [];
+        width = Number.isFinite(width) ? Math.floor(width) : 0;
+        if (width < 1) return [];
         const calls = this.calls();
         // Prefer active rows when the merged fleet exceeds the visible bound.
         const rows = calls.flatMap((call) => [...call.rows.values()]);
@@ -58,15 +59,15 @@ export class FleetComponent implements Component {
         const hidden = Math.max(0, rows.length - MAX_ROWS);
         const lines = [this.theme.fg(
             "accent",
-            `Agents | ${calls.filter((call) => call.live).length} calls | ${rows.length} runs${
-                hidden ? ` | +${hidden} more` : ""
+            `Agents · ${calls.filter((call) => call.live).length} calls · ${rows.length} runs${
+                hidden ? ` · +${hidden} more` : ""
             }`,
         )];
         rows.slice(0, MAX_ROWS).forEach((row) => {
             lines.push(compactRunLines(row, this.theme, true)[0]);
         });
         // Above-editor widgets use the full width without adding a left margin.
-        return lines.map((line) => truncateToWidth(line, width, "..."));
+        return lines.map((line) => clipText(line, width));
     }
 }
 

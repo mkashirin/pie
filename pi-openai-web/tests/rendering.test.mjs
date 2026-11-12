@@ -1,9 +1,12 @@
-import { getOsc8LinkAtColumn, stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
+import { createJiti } from "jiti";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { WebCall, WebStatus, WebView, wrapWebText } from "../src/presentation.ts";
-
 import { attachPage, basePacket } from "../src/results.ts";
+
+const jiti = createJiti(import.meta.url);
+const { getOsc8LinkAtColumn, stripTerminalSequences, visibleWidth, wrapPreservingText } = await jiti
+    .import("@pi-extensions/tui");
+const { renderCall, renderPacket, renderStatus } = await jiti.import("../src/presentation.ts");
 
 const hostEntry = import.meta.resolve("@earendil-works/pi-coding-agent");
 const { ToolExecutionComponent } = await import(
@@ -18,26 +21,26 @@ const strip = stripTerminalSequences;
 
 test("shared wrapping prefers whole words across ANSI boundaries without losing whitespace", () => {
     const expected = ["alpha beta ", "gamma delta"];
-    assert.deepEqual(wrapWebText("alpha beta gamma delta", 12), expected);
+    assert.deepEqual(wrapPreservingText("alpha beta gamma delta", 12), expected);
     const styled = "\x1b[31malpha be\x1b[1mta gamma\x1b[22m delta\x1b[39m";
-    assert.deepEqual(wrapWebText(styled, 12).map(strip), expected);
-    assert.deepEqual(wrapWebText("界😀 alpha beta", 8), ["界😀 ", "alpha ", "beta"]);
-    assert.deepEqual(wrapWebText("e\u0301clair beta", 8), ["e\u0301clair ", "beta"]);
-    assert.deepEqual(wrapWebText("alpha\r\nbeta\rgamma", 12), ["alpha", "beta", "gamma"]);
+    assert.deepEqual(wrapPreservingText(styled, 12).map(strip), expected);
+    assert.deepEqual(wrapPreservingText("界😀 alpha beta", 8), ["界😀 ", "alpha ", "beta"]);
+    assert.deepEqual(wrapPreservingText("e\u0301clair beta", 8), ["e\u0301clair ", "beta"]);
+    assert.deepEqual(wrapPreservingText("alpha\r\nbeta\rgamma", 12), ["alpha", "beta", "gamma"]);
 });
 
 test("calls, fallback results and command/status errors share the word-wrapping policy", () => {
     const text = "alpha beta gamma delta";
-    assert.deepEqual(new WebCall("alpha beta", "gamma delta", plain).render(12), [
+    assert.deepEqual(renderCall("alpha beta", "gamma delta", plain).render(12), [
         "alpha beta ",
         "gamma delta",
     ]);
-    assert.deepEqual(new WebView(undefined, text, plain, false).render(12), [
+    assert.deepEqual(renderPacket(undefined, text, plain, false).render(12), [
         "",
         "alpha beta ",
         "gamma delta",
     ]);
-    const status = new WebStatus(text + "\x07\u202e");
+    const status = renderStatus(text + "\x07\u202e");
     assert.deepEqual(status.render(14), [" alpha beta  ", " gamma delta "]);
     for (const width of [1, 2, 3, 8, 14]) {
         assert.ok(status.render(width).every((line) => visibleWidth(line) <= width));
@@ -52,10 +55,10 @@ test("calls, fallback results and command/status errors share the word-wrapping 
 
 test("status outputPad changes wrapping width without losing evidence whitespace", () => {
     const text = "alpha beta gamma delta";
-    assert.deepEqual(new WebStatus(text, 0).render(14), ["alpha beta ", "gamma delta"]);
-    assert.deepEqual(new WebStatus(text, 1).render(14), [" alpha beta  ", " gamma delta "]);
+    assert.deepEqual(renderStatus(text, 0).render(14), ["alpha beta ", "gamma delta"]);
+    assert.deepEqual(renderStatus(text, 1).render(14), [" alpha beta  ", " gamma delta "]);
     for (const outputPad of [0, 1]) {
-        const status = new WebStatus("  alpha beta  界😀  ", outputPad);
+        const status = renderStatus("  alpha beta  界😀  ", outputPad);
         for (const width of [1, 2, 3, 8, 14, 80]) {
             status.invalidate();
             const rows = status.render(width);
@@ -79,14 +82,14 @@ test("wrapping preserves long answers and URLs, links and one-column Unicode esc
     const url = "https://example.com/" + "x".repeat(180);
     const linked = `\x1b]8;;${url}\x1b\\${url}\x1b]8;;\x1b\\`;
     for (const width of [1, 2, 8, 40]) {
-        const lines = wrapWebText(linked, width);
+        const lines = wrapPreservingText(linked, width);
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
         assert.equal(strip(lines.join("")), url);
-        assert.equal(wrapWebText("answer".repeat(80), width).join(""), "answer".repeat(80));
+        assert.equal(wrapPreservingText("answer".repeat(80), width).join(""), "answer".repeat(80));
     }
-    assert.equal(wrapWebText("界😀", 1).join(""), "\\u{754c}\\u{1f600}");
-    assert.deepEqual(wrapWebText("text", 0), []);
-    assert.deepEqual(wrapWebText("text", NaN), []);
+    assert.equal(wrapPreservingText("界😀", 1).join(""), "\\u{754c}\\u{1f600}");
+    assert.deepEqual(wrapPreservingText("text", 0), []);
+    assert.deepEqual(wrapPreservingText("text", NaN), []);
 });
 
 test("installed theme wrapping retains every evidence space and only explicit empty rows", () => {
@@ -100,7 +103,7 @@ test("installed theme wrapping retains every evidence space and only explicit em
             ["first\n\n  second  \n", 4],
         ]
     ) {
-        const lines = wrapWebText(installedTheme.fg("toolOutput", text), width).map(strip);
+        const lines = wrapPreservingText(installedTheme.fg("toolOutput", text), width).map(strip);
         assert.equal(lines.join(""), text.replace(/\n/gu, ""));
         assert.equal(
             lines.filter((line) => line === "").length,
@@ -108,7 +111,7 @@ test("installed theme wrapping retains every evidence space and only explicit em
         );
         assert.ok(lines.every((line) => visibleWidth(line) <= width));
         assert.deepEqual(
-            new WebView(undefined, text, installedTheme, true).render(width).map(strip),
+            renderPacket(undefined, text, installedTheme, true).render(width).map(strip),
             ["", ...lines],
         );
     }
@@ -127,7 +130,7 @@ test("installed theme wrapping retains every evidence space and only explicit em
         truncated: false,
         truncation: { wire: false, decoded: false, extracted: false, matches: false },
     });
-    const rows = new WebView(packet, "", installedTheme, true).render(4).map(strip);
+    const rows = renderPacket(packet, "", installedTheme, true).render(4).map(strip);
     assert.ok(rows.join("").includes("key     value"));
     assert.equal(rows.filter((row) => row === "").length, 3); // shell, page and excerpt separators
 });
@@ -143,7 +146,7 @@ test("styled hyperlinks reopen on wrapped rows without resetting host background
                 `\x1b[1;4m\x1b]8;id=fixture;${url}${terminator}${text}\x1b]8;;${terminator}\x1b[22;24m`,
             ),
         );
-        const rows = wrapWebText(styled, 4);
+        const rows = wrapPreservingText(styled, 4);
         assert.equal(rows.map(strip).join(""), text);
         for (const row of rows) {
             assert.ok(visibleWidth(row) > 0 && visibleWidth(row) <= 4);
@@ -162,7 +165,7 @@ test("call styles are evaluated on every render without backgrounds or added fra
         fg: (_role, text) => `\x1b[${color}m${text}\x1b[39m`,
         bold: (text) => `\x1b[1m${text}\x1b[22m`,
     };
-    const call = new WebCall("web_action open", "https://example.com/界", theme);
+    const call = renderCall("web_action open", "https://example.com/界", theme);
     const first = call.render(80).join("\n");
     assert.match(first, /\x1b\[1mweb_action open/);
     color = 32;
@@ -177,7 +180,7 @@ test("call styles are evaluated on every render without backgrounds or added fra
 test("result rendering re-evaluates theme and preserves sanitized fallback at narrow widths", () => {
     let color = 31;
     const theme = { fg: (_role, text) => `\x1b[${color}m${text}\x1b[39m` };
-    const view = new WebView(undefined, "first\x07\u202e\t界😀\nsecond", theme, true);
+    const view = renderPacket(undefined, "first\x07\u202e\t界😀\nsecond", theme, true);
     const before = view.render(80).join("\n");
     color = 32;
     view.invalidate();
@@ -193,12 +196,38 @@ test("result rendering re-evaluates theme and preserves sanitized fallback at na
     }
 });
 
+test("display sanitization strips terminal strings before Web styling", () => {
+    for (
+        const [input, expected] of [
+            ["alpha\x1b[31mbeta\x1b[0m", "alphabeta"],
+            ["alpha\x1b]52;c;hidden\ntext\x07beta", "alphabeta"],
+            ["alpha\x1bPhead\ntail\x1b\\beta", "alphabeta"],
+            ["alpha\u009dhidden\u009cbeta", "alphabeta"],
+            ["alpha\x1b]unterminated\nbeta", "alpha"],
+        ]
+    ) {
+        for (
+            const component of [
+                renderCall(input, "", plain),
+                renderPacket(undefined, input, plain, true),
+                renderStatus(input, 0),
+            ]
+        ) {
+            assert.equal(component.render(80).join(""), expected);
+            for (const width of [NaN, Infinity, -1, 0, 0.5]) {
+                assert.deepEqual(component.render(width), []);
+            }
+            assert.deepEqual(component.render(3.9), component.render(3));
+        }
+    }
+});
+
 test("Pi 1.0.0 native tool shell supplies padding and single call/result separator", () => {
     initTheme("dark", false);
     const definition = {
-        renderCall: (_args, theme) => new WebCall("web_action open", "https://example.com", theme),
+        renderCall: (_args, theme) => renderCall("web_action open", "https://example.com", theme),
         renderResult: (_result, _options, theme) =>
-            new WebView(undefined, "first\nsecond", theme, true),
+            renderPacket(undefined, "first\nsecond", theme, true),
     };
     const shell = new ToolExecutionComponent("web_action", "fixture", {}, {}, definition, {
         requestRender() {},
@@ -216,7 +245,7 @@ test("Pi 1.0.0 native tool shell supplies padding and single call/result separat
     assert.equal(lines[heading + 1].trim(), "");
     assert.ok(lines[first].startsWith(" "));
     assert.equal(
-        new WebView(undefined, "long".repeat(50), plain, true).render(10).join(""),
+        renderPacket(undefined, "long".repeat(50), plain, true).render(10).join(""),
         "long".repeat(50),
     );
 });
