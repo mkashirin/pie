@@ -4,8 +4,7 @@ import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
 const { runQuestionnaire } = await jiti.import("@pi-extensions/tui");
-const { runQuestionnaire: upstream } = await jiti.import("@narumitw/pi-tui-kit");
-const { createTuiHarness, createRpcHarness } = await jiti.import("@narumitw/pi-tui-kit/testing");
+const { createTuiHarness, createRpcHarness } = await import("../../tests/interaction-harness.mjs");
 const { answerPlanModeQuestions } = await jiti.import("../src/question-tool.ts");
 const label = "Keep ordinary words together while choosing";
 const question = {
@@ -157,7 +156,7 @@ test("theme styling survives continuation rows, selection changes and invalidati
 
 test(
     "multi-question review, notes, custom answers and editor "
-        + "focus remain upstream-owned",
+        + "focus retain native behavior",
     async () => {
         const { tui, running } = await open({
             questions: [question, { ...question, id: "second" }],
@@ -207,7 +206,7 @@ test(
     },
 );
 
-test("RPC and unsupported questionnaire dispatch remain byte-for-byte upstream", async () => {
+test("RPC and unsupported questionnaire dispatch obey explicit dialog/result contracts", async () => {
     for (const response of [`2. Second option`, undefined]) {
         async function drive(runner) {
             const rpc = createRpcHarness([{
@@ -227,7 +226,20 @@ test("RPC and unsupported questionnaire dispatch remain byte-for-byte upstream",
             return result;
         }
 
-        assert.deepEqual(await drive(runQuestionnaire), await drive(upstream));
+        assert.deepEqual(
+            await drive(runQuestionnaire),
+            response === undefined
+                ? { kind: "closed", reason: "back" }
+                : {
+                    kind: "submitted",
+                    answers: [{
+                        questionId: question.id,
+                        answer: "Second option",
+                        wasCustom: false,
+                        optionIndex: 2,
+                    }],
+                },
+        );
     }
     for (const [mode, hasUI] of [["tui", false], ["rpc", false], ["print", true]]) {
         async function drive(runner) {
@@ -239,6 +251,9 @@ test("RPC and unsupported questionnaire dispatch remain byte-for-byte upstream",
             return { result, calls };
         }
 
-        assert.deepEqual(await drive(runQuestionnaire), await drive(upstream));
+        assert.deepEqual(await drive(runQuestionnaire), {
+            result: { kind: "unsupported", mode },
+            calls: [mode],
+        });
     }
 });

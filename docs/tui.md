@@ -2,19 +2,19 @@
 
 `@pi-extensions/tui` is the private, source-only `0.1.0` workspace at [`tui/`](../tui). It is not a
 Pi extension and does not create a renderer. The root bundle still registers exactly six
-extensions; all six depend on this workspace. Pi supplies the host packages as peers. Only this
-workspace pins `@narumitw/pi-tui-kit` (`0.59.0`). Install from the bundle root with the shared
+extensions; all six depend on this workspace. Pi supplies the host packages as peers; this
+workspace has no runtime library dependencies. Install from the bundle root with the shared
 lockfile, not inside a child. Independent consumer tarballs require the private workspace too; they
 are not standalone registry installs. Root bundle packing includes its sources and manifests.
 
 ## Ownership and integration
 
-Use native `ctx.ui` dialogs/status/widgets when sufficient. Import host TUI components and Kit
-contracts through `@pi-extensions/tui`; do not import its private `src/` paths from consumer
-runtime code. The package owns generic display mechanics and menu/questionnaire rendering only.
-Extension registration, tool/evidence payloads, HEM's editor-offset mapping, OAuth/credentials,
-fleet leases/heartbeats, Plan workflow state, persistence, and cancellation authority stay in
-consumers. There is no shared lifecycle/clock abstraction.
+Use native `ctx.ui` dialogs/status/widgets when sufficient. Import host TUI components and local
+interaction contracts through `@pi-extensions/tui`; do not import its private `src/` paths from
+consumer runtime code. The package owns generic display mechanics and menu/questionnaire rendering
+only. Extension registration, tool/evidence payloads, HEM's editor-offset mapping,
+OAuth/credentials, fleet leases/heartbeats, Plan workflow state, persistence, and cancellation
+authority stay in consumers. There is no shared lifecycle/clock abstraction.
 
 The host contract is described in the installed coding-agent `docs/tui.md` and `docs/extensions.md`
 (Pi 1.5.0). A `Component` returns rows fitting `render(width)`, implements `invalidate()`, and
@@ -28,16 +28,19 @@ The sole export is [`tui/src/index.ts`](../tui/src/index.ts):
 
 - All host `@earendil-works/pi-tui` values/types are re-exported unchanged, including `Component`,
   `Text`, `Markdown`, `Box`, `Input`, `SelectList`, key parsing, and width helpers.
-- All Kit **types** are re-exported. Kit runtime values are limited to `defineMenu`,
-  `sanitizeTerminalText`, and the local dispatchers `runMenu` / `runQuestionnaire`. Their
-  signatures are exactly the pinned Kit signatures. Only `ctx.mode === "tui" && ctx.hasUI` uses the
-  local JS renderers; RPC and unsupported/no-UI paths call upstream unchanged. Menu definitions,
-  answers, IDs, task behavior, and cancellation results retain the Kit contract. The ten focused JS
-  files live in `tui/src/interaction/`; MIT provenance is retained in `tui/LICENSE`. Adjacent
-  `menu.d.ts` / `questionnaire.d.ts` declarations expose the pinned Kit function types without
-  requiring consumers to enable `allowJs`. This is an explicit, runtime-tested JS implementation
-  boundary, not full TypeScript checking of the JS layer. Both declarations ship with the source
-  package and root bundle.
+- `defineMenu<State>(definition: MenuDefinition<State>)` defines local screen/action factories.
+  `runMenu(ctx, definition, { getState, signal?, isCurrent?, onUnsupportedMode? })` supports
+  actions, detail, choice, settings, input, and multi-select screens. Screen IDs and routing remain
+  separate from sanitized display labels. `runQuestionnaire(ctx, { questions, allowNotes?, title?,
+  ...owner })` supports choices, custom answers, notes, and review. Public types live in
+  [`interaction/types.ts`](../tui/src/interaction/types.ts); implementations are strict TypeScript
+  under `tui/src/interaction/`, with no third-party Pi-extension imports or type aliases.
+- TUI interactions use native `ui.custom()` and host input components; RPC uses `ui.select`,
+  `ui.input`, and `ui.editor`. Menus return `closed`, `stale`, or `unsupported`; questionnaires can
+  also return `submitted` with raw answers. Abort/ownership changes prevent late routing, commits,
+  and notifications, even when a pending RPC dialog ignores cancellation. No-UI/unsupported modes
+  invoke the optional fallback callback and return `unsupported` without opening TUI components.
+  `sanitizeTerminalText(value)` is a multiline display-only sanitizer with tabs replaced by spaces.
 - `sanitizeDisplayText(value: string, options: DisplayTextOptions): string`. Options require
   `multiline: boolean` and `tabs: "preserve" | "space" | "expand" | "remove"`; optional `controls:
   "space" | "remove"` defaults to removal. `expand` means four spaces, not tab stops.
@@ -75,10 +78,10 @@ The sole export is [`tui/src/index.ts`](../tui/src/index.ts):
   three components have `render(width): string[]` and `invalidate(): void`; `ThemedLines` and
   `ThemedText` evaluate their callbacks on each valid render without caching.
 - `formatInteractionHints(keybindings: InteractionKeybindings, hints: readonly InteractionHint[]):
-  string` uses Kit's injected-keybinding hints with native arrow glyphs and `·` separators.
+  string` formats injected keybindings with native arrow glyphs and `·` separators.
   `formatHintKeys(keys: readonly string[]): string` deduplicates and joins with `/`, rendering
-  arrow keys as `↑`, `↓`, `←`, `→`, and `alt` as `option` on macOS. Adapt vendor chrome only, never
-  user/model content.
+  arrow keys as `↑`, `↓`, `←`, `→`, and `alt` as `option` on macOS. Format generated chrome only,
+  never user/model content.
 
 All shared wrappers/components floor finite widths and return no rows for widths below one.
 Clipping returns an empty string for those widths. Measure terminal cells with `visibleWidth`, not
@@ -119,13 +122,13 @@ const evidence = new ThemedText(() => trustedEvidence, { wrap: wrapPreservingTex
 ## Verification and manual smoke
 
 From the bundle root: `npm run typecheck`, `npm run check --workspaces`, and `npm test`. All six
-consumers use the shared import boundary; `tests/tui-boundary.test.mjs` enforces it. Test imports
-of upstream harnesses/private shared components are intentionally exempt.
+consumers use the shared import boundary; `tests/tui-boundary.test.mjs` enforces it. Tests can
+inspect private shared components and use the local `tests/interaction-harness.mjs` host driver.
 `tests/tui-types.test.mjs` compiles a strict consumer with `allowJs: false` through the public
-entrypoint and checks pinned interaction signatures. `tests/tui-packaging.test.mjs` checks that
-runtime sources and declarations ship together. Root and shared pack checks are offline dry runs
-with scripts disabled; they do not prove a clean runtime-only install. All child formatter configs
-cover their docs; root formatting covers root `AGENTS.md` and `docs/**/*.md`.
+entrypoint, including invalid state/action contracts. `tests/tui-packaging.test.mjs` checks the
+host-only dependency graph and packed TypeScript runtime closure. Root and shared pack checks are
+offline dry runs with scripts disabled; they do not prove a clean runtime-only install. All child
+formatter configs cover their docs; root formatting covers root `AGENTS.md` and `docs/**/*.md`.
 
 In a real Pi terminal, with this bundle loaded once:
 

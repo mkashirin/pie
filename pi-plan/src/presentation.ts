@@ -2,31 +2,8 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-c
 import { sanitizeDisplayText, wrapProse } from "@pi-extensions/tui";
 import type { PlanModeState } from "./state.ts";
 
-const STATUS_KEY = "plan-mode";
-const PLAN_WIDGET_KEY = "plan-mode-plan";
-
-export function updatePlanModeUi(
-    ctx: ExtensionContext,
-    state: PlanModeState,
-    toolSummary: () => string,
-) {
-    ctx.ui.setStatus(STATUS_KEY, formatStatus(state));
-    let lines: string[] | undefined;
-    if (state.enabled && state.latestPlan) {
-        lines = ["Proposed plan ready", "Use /plan to implement, save, revise, or exit Plan mode."];
-    } else if (state.enabled) {
-        lines = [
-            "Plan mode: planning",
-            toolSummary(),
-            "Finish with plan_mode_complete when decision-ready.",
-        ];
-    } else if (state.savedPlan) {
-        lines = ["Plan saved for later", "Use /plan to show, implement, or clear it."];
-    } else if (state.activeImplementation) {
-        lines = ["Implementation plan active", "Use /plan to show, replace, or clear it."];
-    }
-
-    publishPlanModeWidget(ctx, lines);
+export function sanitizePlanModeWidgetLine(value: string): string {
+    return sanitizeDisplayText(value, { multiline: false, tabs: "space" });
 }
 
 export function renderPlanModeWidget(
@@ -34,108 +11,79 @@ export function renderPlanModeWidget(
     theme: Theme,
     width: number,
 ): string[] {
-    const renderWidth = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+    const columns = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
     return [
-        theme.fg("borderMuted", "─".repeat(renderWidth)),
+        theme.fg("dim", "─".repeat(columns)),
         ...lines.flatMap((line) =>
-            renderWidth > 0
-                ? wrapProse(sanitizePlanModeWidgetLine(line), renderWidth)
+            columns
+                ? wrapProse(theme.fg("muted", sanitizePlanModeWidgetLine(line)), columns)
                 : [""]
         ),
     ];
 }
 
-export function sanitizePlanModeWidgetLine(value: string): string {
-    return sanitizeDisplayText(value, { multiline: false, tabs: "space", controls: "space" });
-}
-
-export function clearPlanModeUi(ctx: ExtensionContext) {
-    ctx.ui.setStatus(STATUS_KEY, undefined);
-    ctx.ui.setWidget(PLAN_WIDGET_KEY, undefined);
-}
-
-export function showStoredPlan(pi: ExtensionAPI, ctx: ExtensionContext, state: PlanModeState) {
-    const readyPlan = state.enabled ? state.latestPlan?.trim() : undefined;
-    const savedPlan = state.savedPlan?.plan.trim();
-    if (savedPlan && (ctx.mode === "print" || ctx.mode === "json")) {
-        throw new Error("Saved plan display is unavailable in print/JSON mode. Use TUI or RPC.");
+export function planModeStatusText(state: PlanModeState, toolSummary: () => string): string {
+    if (state.enabled) {
+        return state.awaitingAction
+            ? "Plan ready · /plan to review and choose the next action"
+            : `Plan mode · ${toolSummary()} · /plan for actions`;
     }
-    const activePlan = state.activeImplementation?.plan.trim();
-    const plan = readyPlan ?? savedPlan ?? activePlan;
-    if (!plan) {
-        ctx.ui.notify(
-            "No completed plan is available. Use /plan finalize when planning is complete.",
-            "info",
-        );
+    if (state.activeImplementation) return "Implementing plan · /plan for actions";
+    if (state.savedPlan) return "Plan saved · /plan to implement, export or clear";
+    return "Ready to plan";
+}
+
+export function updatePlanModeUi(
+    ctx: ExtensionContext,
+    state: PlanModeState,
+    toolSummary: () => string,
+): void {
+    if (!ctx.hasUI) return;
+    if (!state.enabled && !state.savedPlan && !state.activeImplementation) {
+        clearPlanModeUi(ctx);
         return;
     }
-    const title = readyPlan
-        ? "Proposed Plan"
-        : savedPlan
-        ? "Saved Plan"
-        : "Active Implementation Plan";
-    showPlanModePlan(pi, ctx, title, plan);
+    const lines = [planModeStatusText(state, toolSummary)];
+    ctx.ui.setStatus(
+        "plan-mode",
+        state.enabled ? "Plan" : state.savedPlan ? "Plan saved" : "Implement",
+    );
+    if (ctx.mode === "tui") {
+        ctx.ui.setWidget("plan-mode", (_tui, theme) => ({
+            invalidate() {},
+            render: (width) => renderPlanModeWidget(lines, theme, width),
+        }));
+    } else ctx.ui.setWidget("plan-mode", lines);
+}
+
+export function clearPlanModeUi(ctx: ExtensionContext): void {
+    if (!ctx.hasUI) return;
+    ctx.ui.setStatus("plan-mode", undefined);
+    ctx.ui.setWidget("plan-mode", undefined);
 }
 
 export function showPlanModePlan(
     pi: ExtensionAPI,
-    ctx: ExtensionContext,
+    _ctx: ExtensionContext,
     title: string,
     plan: string,
-) {
-    try {
-        pi.sendMessage(
-            {
-                customType: "proposed-plan",
-                content: `**${title}**\n\n${plan}`,
-                display: true,
-            },
-            { triggerTurn: false },
-        );
-    } catch (error: unknown) {
-        const detail = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(`Unable to show completed plan: ${detail}`, "error");
-    }
+): void {
+    pi.sendMessage({
+        customType: "plan-mode-plan",
+        content: plan,
+        display: true,
+        details: { title, plan },
+    }, { triggerTurn: false });
 }
 
-export function planModeStatusText(state: PlanModeState, toolSummary: () => string) {
-    if (state.enabled) {
-        if (state.latestPlan) {
-            return `Plan mode is active and a proposed plan is ready. ${toolSummary()}`;
-        }
-        return ("Plan mode is active. "
-            + `${toolSummary()}`
-            + " Explore, ask, and finish with plan_mode_complete when "
-            + "decision-ready.");
-    }
-    if (state.savedPlan) return "A plan is saved for later.";
-    if (state.activeImplementation) return "An implementation plan is active.";
-    return "Plan mode is off.";
-}
-
-function publishPlanModeWidget(ctx: ExtensionContext, lines: readonly string[] | undefined) {
-    if (!lines) {
-        ctx.ui.setWidget(PLAN_WIDGET_KEY, undefined);
-        return;
-    }
-    if (ctx.mode !== "tui") {
-        ctx.ui.setWidget(PLAN_WIDGET_KEY, [...lines]);
-        return;
-    }
-
-    const snapshot = [...lines];
-    ctx.ui.setWidget(PLAN_WIDGET_KEY, (_tui, theme) => ({
-        render: (width) => renderPlanModeWidget(snapshot, theme, width),
-        invalidate: () => {},
-    }));
-}
-
-function formatStatus(state: PlanModeState) {
-    if (state.enabled) {
-        if (state.awaitingAction || state.latestPlan) return "plan ready";
-        return "plan active";
-    }
-    if (state.savedPlan) return "plan saved";
-    if (state.activeImplementation) return "plan implementing";
-    return undefined;
+export function showStoredPlan(
+    pi: ExtensionAPI,
+    ctx: ExtensionContext,
+    state: PlanModeState,
+): void {
+    const plan = state.enabled
+        ? state.latestPlan
+        : state.savedPlan?.plan ?? state.activeImplementation?.plan;
+    if (plan) showPlanModePlan(pi, ctx, state.savedPlan ? "Saved plan" : "Plan", plan);
+    else ctx.ui.notify("No completed plan is available yet.", "info");
 }

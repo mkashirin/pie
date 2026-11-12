@@ -8,9 +8,8 @@ export function planExportInputScreen(getDestination: PlanExportDestinationProvi
         kind: "input" as const,
         title: "Export plan",
         lines: [
-            "Existing paths are never overwritten.",
-            `Default: ${destination.configuredPath}`,
-            `Resolves to: ${destination.resolvedPath}`,
+            "Create a Markdown file without overwriting existing files.",
+            `Default: ${destination.resolvedPath}`,
         ],
         placeholder: destination.configuredPath,
         action: "export" as const,

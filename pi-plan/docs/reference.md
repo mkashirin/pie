@@ -74,22 +74,17 @@ input and stale-session protections rather than treating handoff as a simple pro
 ## Presentation and adapter boundary
 
 The root [`index.ts`](../index.ts) is the Pi discovery shim; [`src/index.ts`](../src/index.ts)
-preserves the factory and existing renderer exports. There is no compiled chunk tree or vendored
-full Kit.
+preserves the factory and existing renderer exports. There is no build or compiled chunk tree.
 
-The shared [`tui/src/interaction.ts`](../../tui/src/interaction.ts) adapter routes **only**
-`mode === "tui" && hasUI` to the local renderers. RPC and unsupported/no-UI dispatch remain with
-the pinned upstream Kit adapters. Plan-specific menu definitions remain under `src/*-menu.ts`;
-generic JavaScript implementations live under [`tui/src/interaction/`](../../tui/src/interaction/).
-The private source-only `@pi-extensions/tui` workspace is shared support code, not a seventh Pi
-extension. See [the TUI guide](../../docs/tui.md) for its public surface; do not restore private
-interaction copies or adapters inside Plan.
-
-Kit **0.59.0** continues to provide public navigation, definitions, tasks, custom-interaction
-ownership, borders/hints, and sanitization. The focused local layer supports Plan's actions,
-detail, choice, settings, input, and multiselect screens, plus questionnaire review. It does not
-copy the entire Kit, standalone browse/review screens, document formatting, syntax highlighting,
-Mermaid preparation, duplicate RPC runners, or unrelated development exports.
+The shared [`tui/src/interaction.ts`](../../tui/src/interaction.ts) entrypoint owns local typed
+menus and questionnaires. TUI uses Pi's custom-component/input APIs; RPC uses native select/input/
+editor dialogs. No-UI/unsupported modes return explicit outcomes without constructing terminal
+components. Plan-specific menu definitions remain under `src/*-menu.ts`; generic TypeScript
+implementations live under [`tui/src/interaction/`](../../tui/src/interaction/). The private
+source-only `@pi-extensions/tui` workspace is shared support code, not a seventh Pi extension. See
+[the TUI guide](../../docs/tui.md) for its public surface. Keep interaction ownership, abort
+handling, navigation, hints, and sanitization there rather than duplicating private adapters inside
+Plan.
 
 Presentation contracts to retain:
 
@@ -116,21 +111,27 @@ After `./install.sh --dev` at the bundle root, run root `npm run check` for the 
 run check --workspace pi-plan` for Plan. Shared interaction changes also need the shared TUI and
 affected consumer gates. No child install or managed Pi patch is required.
 
-The package gate checks formatting, strict TypeScript for the core/adapter, and regression tests
-using root tooling/jiti and Pi **1.5.0**. Interaction JavaScript is covered by runtime harnesses,
-not full JavaScript type checking. Tests map as follows:
+The package gate checks formatting, strict TypeScript for the core/interactions, and regression
+tests using root tooling/jiti and Pi **1.5.0**. Local host-contract fixtures drive TUI and RPC
+behavior without importing another Pi extension. Tests map as follows:
 
 - [`tests/core.test.mjs`](../tests/core.test.mjs): local Pi loader/exports, completion and legacy
   formats, state recovery, policy, settings, export, finalization/retention, workflow ownership.
 - [`tests/picker.test.mjs`](../tests/picker.test.mjs): wrapped menu kinds, Unicode widths, physical
   row budgets/resize, focus, hints, raw IDs/text, cancellation, caller routing, RPC parity, and
-  source/provenance closure assertions.
+  local source/dependency closure assertions.
 - [`tests/questionnaire.test.mjs`](../tests/questionnaire.test.mjs) and
   [`tests/numbers.test.mjs`](../tests/numbers.test.mjs): wrapped questions/review/editors, remapped
-  keys, number shortcuts, notes, cancellation, and upstream RPC equivalence.
+  keys, number shortcuts, notes, cancellation, and explicit RPC protocol expectations.
 - [`tests/chat.test.mjs`](../tests/chat.test.mjs) and
   [`tests/widget.test.mjs`](../tests/widget.test.mjs): readable cards, wrapping, resize,
   sanitization, persistent widget, and padding boundaries.
+
+[`tests/independent-core.test.mjs`](../tests/independent-core.test.mjs) adds shell-policy, settings
+publication, export rollback, restoration, and fresh-session adverse cases.
+[`tests/independent-runtime.test.mjs`](../tests/independent-runtime.test.mjs) exercises actual
+registered handlers/tools, ownership replacement, runtime rollback, retention, and stale UI
+callbacks.
 
 Live terminal checks remain necessary: `/plan` and `/plan settings`, narrow/wide/short-terminal
 resize, remapped keys/focus, model/thinking and tool selection, questionnaire numbers/Other/notes,
@@ -139,15 +140,13 @@ are not live terminal, model-access, or minimum-Node verification.
 
 ## Source updates
 
-Keep typed Plan Mode modules as source rather than reconstructing them from generated JavaScript.
-The source baseline is **0.58.3**, archive SHA-1: `02e0a9e0a2419fbac0603fb7f56a25900fb364ff`.
+Plan's workflow and shared menu/questionnaire state machines are local implementations against Pi's
+public host APIs. Maintain them from their behavior contracts and regression tests; do not restore
+copied third-party Pi-extension source or runtime/type dependencies.
 
-Focused interaction modules live in the shared TUI workspace and use Kit **0.59.0** contracts with
-local wrapping adaptations. Exact dependency archive integrity remains in
-[`package-lock.json`](../../package-lock.json).
-
-Update deliberately against matching source versions. Preserve workflow closure, settings-name and
-session compatibility, widget/chat/wrapping, and TUI-only adapter routing. Account for Kit contract
-changes at the shared boundary. Do not replace sources with `dist/`, copy the full Kit, patch
-managed Pi or `node_modules`, or re-enable npm Plan Mode beside this extension. Retain
-[LICENSE](../LICENSE) and the shared workspace's corresponding notices.
+Preserve workflow closure, settings/session compatibility, widget/chat/wrapping, and TUI/RPC/no-UI
+routing. Extend adverse lifecycle tests when changing asynchronous operations. An obsolete
+coordinator must not issue new model/thinking changes, commits, or notifications after session
+replacement; an already-issued host model operation cannot be retracted by this extension. Do not
+patch managed Pi or `node_modules`, or load another Plan provider beside this extension. Retain the
+project [LICENSE](../LICENSE); ordinary runtime dependencies keep their own licenses.

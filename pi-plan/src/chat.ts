@@ -4,72 +4,23 @@ import {
     type Theme,
 } from "@earendil-works/pi-coding-agent";
 import {
-    Box,
     type Component,
     escapeMarkdownText,
-    Markdown,
     sanitizeDisplayText,
-    Spacer,
-    Text,
     ThemedMarkdown,
     wrapProse,
 } from "@pi-extensions/tui";
+import type { PlanModeQuestion, PlanModeQuestionAnswer } from "./question-tool.ts";
 
 interface ChatResult {
     content: Array<{ type: string; text?: string }>;
     details?: unknown;
 }
-
-type RecordValue = Record<string, unknown>;
 type Status = "waiting" | "answered" | "cancelled" | "ready" | "error";
+const plain = (text: string) => sanitizeDisplayText(text, { multiline: true, tabs: "space" });
+const literal = (text: string) => escapeMarkdownText(plain(text));
 
-function record(value: unknown): RecordValue {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as RecordValue
-        : {};
-}
-
-function clean(value: unknown): string {
-    return sanitizeDisplayText(typeof value === "string" ? value : "", {
-        multiline: true,
-        tabs: "space",
-        controls: "space",
-    }).trim();
-}
-
-function prose(value: unknown): string {
-    return escapeMarkdownText(clean(value));
-}
-
-function contentText(result: ChatResult): string {
-    return result.content.filter((block) => block.type === "text")
-        .map((block) => block.text ?? "").join("\n");
-}
-
-/** Match Pi's custom-message shell, but let its render options own horizontal padding. */
-export const renderPlanMessage: MessageRenderer = (message, options, theme) => {
-    const box = new Box(options?.outputPad ?? 1, 1, (text) => theme.bg("customMessageBg", text));
-    box.addChild(
-        new Text(
-            theme.fg("customMessageLabel", theme.bold(`[${message.customType}]`)),
-            0,
-            0,
-        ),
-    );
-    box.addChild(new Spacer(1));
-    const text = typeof message.content === "string"
-        ? message.content
-        : message.content.filter((block) => block.type === "text").map((block) => block.text)
-            .join("\n");
-    box.addChild(
-        new Markdown(text, 0, 0, getMarkdownTheme(), {
-            color: (value) => theme.fg("customMessageText", value),
-        }),
-    );
-    return box;
-};
-
-/** Transcript presentation only: payloads, IDs and model-facing JSON remain unchanged. */
+/** Transcript formatting never mutates the tool's model-facing payload. */
 export class PlanChatCard implements Component {
     private body: ThemedMarkdown;
 
@@ -79,98 +30,110 @@ export class PlanChatCard implements Component {
         private theme: Theme,
         private status: Status,
     ) {
-        const text = clean(body);
-        this.body = new ThemedMarkdown(() => text, getMarkdownTheme);
+        this.body = new ThemedMarkdown(() => body, () => getMarkdownTheme());
     }
 
-    invalidate() {
+    invalidate(): void {
         this.body.invalidate();
     }
 
     render(width: number): string[] {
-        if (!Number.isFinite(width) || width < 1) return [];
-        const columns = Math.floor(width);
-        const color = this.status === "error"
-            ? "error"
-            : this.status === "cancelled"
-            ? "warning"
-            : this.status === "waiting"
-            ? "muted"
-            : "success";
-        const heading = this.theme.fg("accent", this.theme.bold(this.title))
-            + " · " + this.theme.fg(color, this.status);
+        const columns = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+        if (!columns) return [];
+        const heading = this.theme.fg("toolTitle", `${plain(this.title)} · ${this.status}`);
         return [...wrapProse(heading, columns), "", ...this.body.render(columns)];
     }
 }
 
-export function renderPlanQuestionCall(args: unknown, theme: Theme) {
-    const questions = record(args).questions;
+/** Message shells, unlike tool-shell children, receive the current outputPad from Pi. */
+export const renderPlanMessage: MessageRenderer = (message, options, theme) => {
+    const details = message.details as { title?: string; plan?: string } | undefined;
+    const body = details?.plan ?? (typeof message.content === "string"
+        ? message.content
+        : message.content.filter((part) => part.type === "text").map((part) => part.text).join(
+            "\n",
+        ));
+    const card = new PlanChatCard(details?.title ?? "Plan", body, theme, "ready");
+    return {
+        invalidate: () => card.invalidate(),
+        render(width) {
+            const columns = Number.isFinite(width) ? Math.max(0, Math.floor(width)) : 0;
+            const pad = options.outputPad === 1 && columns >= 3 ? " " : "";
+            return card.render(columns - pad.length * 2).map((line) => pad + line + pad);
+        },
+    };
+};
+
+export function renderPlanQuestionCall(args: unknown, theme: Theme): PlanChatCard {
+    const questions = (args as { questions?: PlanModeQuestion[] } | undefined)?.questions;
     const body = Array.isArray(questions)
-        ? questions.map((value, index) => {
-            const question = record(value);
-            const options = Array.isArray(question.options) ? question.options : [];
-            return [
-                `### ${prose(question.header) || `Question ${index + 1}`}`,
-                prose(question.question),
-                options.map((value, optionIndex) => {
-                    const option = record(value);
-                    const description = prose(option.description);
-                    return `${optionIndex + 1}. **${prose(option.label)}**`
-                        + (description ? ` - ${description}` : "");
-                }).join("\n"),
-            ].filter(Boolean).join("\n\n");
-        }).join("\n\n")
-        : "_Preparing questions._";
+        ? questions.map((question) =>
+            [
+                `### ${literal(question.header ?? "Question")}`,
+                literal(question.question ?? ""),
+                ...(Array.isArray(question.options)
+                    ? question.options.map((option, index) =>
+                        `${index + 1}. ${literal(option.label)}${
+                            option.description ? ` — ${literal(option.description)}` : ""
+                        }`
+                    )
+                    : []),
+            ].join("\n\n")
+        ).join("\n\n")
+        : "Preparing questions.";
     return new PlanChatCard("Plan · Questions", body, theme, "waiting");
+}
+
+function questionDetails(result: ChatResult): {
+    cancelled?: boolean;
+    answers?: PlanModeQuestionAnswer[];
+} | undefined {
+    if (result.details && typeof result.details === "object") return result.details;
+    for (const part of result.content) {
+        if (part.type !== "text" || !part.text) continue;
+        try {
+            const parsed = JSON.parse(part.text);
+            if (parsed && typeof parsed === "object") return parsed;
+        } catch {
+            // Legacy results can be prose rather than JSON.
+        }
+    }
+    return undefined;
 }
 
 export function renderPlanQuestionResult(
     result: ChatResult,
     options: { isPartial: boolean },
     theme: Theme,
-) {
-    let payload: RecordValue = {};
-    const text = contentText(result);
-    try {
-        payload = record(JSON.parse(text));
-    } catch {
-        // Plain tool errors are still readable; only structured question results are decoded.
+): PlanChatCard {
+    if (options.isPartial) {
+        return new PlanChatCard("Plan · Answers", "Waiting for answers", theme, "waiting");
     }
-    const details = { ...payload, ...record(result.details) };
-    if (details.cancelled === true) {
-        const message = prose(details.message) || prose(details.reason) || "Question cancelled.";
-        return new PlanChatCard("Plan · Questions", message, theme, "cancelled");
-    }
-    if (Array.isArray(details.answers)) {
-        const body = details.answers.map((value, index) => {
-            const answer = record(value);
-            const number = Number.isInteger(answer.optionIndex) ? `${answer.optionIndex}. ` : "";
-            return [
-                `### ${prose(answer.header) || `Question ${index + 1}`}`,
-                prose(answer.question),
-                `**${answer.wasCustom ? "Custom answer" : "Answer"}:** ${number}${
-                    prose(answer.answer)
+    const details = questionDetails(result);
+    const answers = details?.answers;
+    const body = Array.isArray(answers)
+        ? answers.map((answer) =>
+            [
+                `### ${literal(answer.header ?? "Answer")}`,
+                literal(answer.question ?? ""),
+                `Answer: ${answer.optionIndex ? `${answer.optionIndex}. ` : ""}${
+                    literal(answer.answer)
                 }`,
-                ...(typeof answer.note === "string" && answer.note
-                    ? [`**Note:**\n\n${prose(answer.note)}`]
-                    : []),
-            ].filter(Boolean).join("\n\n");
-        }).join("\n\n");
-        return new PlanChatCard("Plan · Answers", body, theme, "answered");
-    }
-    const body = options.isPartial
-        ? "_Waiting for answers._"
-        : Object.keys(payload).length
-        ? "_No answers available._"
-        : prose(text);
+                ...(answer.note ? [`Note: ${literal(answer.note)}`] : []),
+            ].join("\n\n")
+        ).join("\n\n")
+        : result.content.filter((part) => part.type === "text").map((part) =>
+            plain(part.text ?? "")
+        )
+            .join("\n");
     return new PlanChatCard(
-        "Plan · Questions",
+        "Plan · Answers",
         body,
         theme,
-        options.isPartial ? "waiting" : "error",
+        details?.cancelled ? "cancelled" : "answered",
     );
 }
 
-export function renderPlanCompletionCall(_args: unknown, theme: Theme) {
-    return new PlanChatCard("Plan", "_Preparing the implementation plan._", theme, "waiting");
+export function renderPlanCompletionCall(_args: unknown, theme: Theme): PlanChatCard {
+    return new PlanChatCard("Plan", "Preparing the completed plan for review.", theme, "waiting");
 }

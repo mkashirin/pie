@@ -9,7 +9,6 @@ export interface PlanLaunchTool {
     disabled: boolean;
     disabledReason?: string;
 }
-
 interface PlanLaunchMenuOptions {
     statusText: string;
     toolSummary(selectedNames: ReadonlySet<string>): string;
@@ -23,113 +22,87 @@ interface PlanLaunchMenuOptions {
     settings(signal: AbortSignal): Promise<boolean>;
 }
 
-export async function showPlanLaunchMenu(ctx: ExtensionContext, options: PlanLaunchMenuOptions) {
-    type Screen = "main" | "tools" | "help";
-    type Action = "start" | "toggle-tool" | "start-with-tools" | "settings";
-    const selectedNames = new Set(options.getSelectedNames());
-    const toolItems = options.tools.map((tool, index) => ({
-        id: `plan-tool:${index}`,
-        tool,
-    }));
-    const toolsByItemId = new Map(toolItems.map(({ id, tool }) => [id, tool]));
-    let draftChanged = false;
-    const menu = defineMenu<undefined, Screen, Action, ExtensionContext>({
+export async function showPlanLaunchMenu(
+    ctx: ExtensionContext,
+    options: PlanLaunchMenuOptions,
+): Promise<void> {
+    const signal = options.signal ?? new AbortController().signal;
+    const selected = new Set(options.getSelectedNames());
+    const current = () => !signal.aborted && options.isCurrent();
+    const menu = defineMenu({
         start: options.initialScreen ?? "main",
         screens: {
             main: () => ({
-                kind: "actions",
+                kind: "actions" as const,
                 title: "Plan mode",
-                lines: [options.statusText, options.toolSummary(selectedNames)],
+                lines: [options.statusText, options.toolSummary(selected)],
                 items: [
                     { id: "start", label: "Start Plan mode", action: "start" },
                     { id: "tools", label: "Choose tools, then start...", to: "tools" },
                     { id: "settings", label: "Settings", action: "settings" },
                     { id: "help", label: "How Plan mode works", to: "help" },
                 ],
-                hint: "close",
             }),
             tools: () => ({
-                kind: "multiSelect",
-                title: "Choose Plan policy allowlist",
+                kind: "multiSelect" as const,
+                title: "Planning tools",
                 lines: [
-                    "Policy changes apply only when you start Plan mode; first "
-                    + "use may also reveal Plan helpers.",
-                    options.toolSummary(selectedNames),
-                    "Active tools can be chosen now; retained names resolve "
-                    + "before the first request.",
-                    "Plan mode never activates tools, and non-built-ins run at user risk.",
+                    options.toolSummary(selected),
+                    "Custom tools are opt-in and may have side effects. This is not a sandbox.",
                 ],
                 enableSearch: true,
-                viewportSize: 10,
-                items: toolItems.map(({ id, tool }) => ({
-                    id,
+                action: "toggle",
+                items: options.tools.map((tool) => ({
+                    id: tool.name,
                     label: tool.label ?? tool.name,
                     description: tool.description,
                     searchText: tool.searchText,
-                    selected: selectedNames.has(tool.name),
                     disabled: tool.disabled,
                     disabledReason: tool.disabledReason,
+                    selected: selected.has(tool.name),
                 })),
-                action: "toggle-tool",
-                actions: [
-                    {
-                        id: "start-with-tools",
-                        label: "Done - start with this policy",
-                        action: "start-with-tools",
-                    },
-                ],
-                hint: "back",
+                actions: [{
+                    id: "done",
+                    label: "Done - start with this policy",
+                    action: "startWithTools",
+                }],
             }),
             help: () => ({
-                kind: "detail",
+                kind: "detail" as const,
                 title: "How Plan mode works",
                 lines: [
-                    "Plan mode uses read-only exploration to understand the "
-                    + "project before implementation.",
-                    "The agent can ask important decision questions, then "
-                    + "returns a complete implementation-ready plan.",
-                    "File mutation stays blocked until you explicitly choose to "
-                    + "implement the completed plan.",
+                    "Explore without editing, answer focused questions, then review the completed plan.",
+                    "Choose whether to implement here, start a fresh session, save or export the plan.",
+                    "Tools are locked while planning. Exit to choose a different policy.",
+                    "Built-in writes are blocked; selected custom tools run at your risk.",
                 ],
-                hint: "back",
             }),
         },
         actions: {
-            start: async ({ signal }) => {
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
+            start: () => {
+                if (!current()) return { kind: "rejected" as const };
                 options.start(signal);
-                return { kind: "close" };
+                return { kind: "close" as const };
             },
-            "toggle-tool": async ({ itemId, selected, signal }) => {
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
-                const tool = itemId ? toolsByItemId.get(itemId) : undefined;
-                if (!tool || tool.disabled) return { kind: "rejected" };
-                if (selected) selectedNames.add(tool.name);
-                else selectedNames.delete(tool.name);
-                draftChanged = true;
-                return { kind: "stay" };
+            startWithTools: () => {
+                if (!current()) return { kind: "rejected" as const };
+                options.startWithTools([...selected], signal);
+                return { kind: "close" as const };
             },
-            "start-with-tools": async ({ signal }) => {
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
-                options.startWithTools(Array.from(selectedNames), signal);
-                return { kind: "close" };
+            toggle: ({ itemId, selected: checked }: { itemId?: string; selected?: boolean }) => {
+                if (
+                    !current() || !itemId
+                    || !options.tools.some((tool) => tool.name === itemId && !tool.disabled)
+                ) return { kind: "rejected" as const };
+                if (checked) selected.add(itemId);
+                else selected.delete(itemId);
+                return { kind: "stay" as const };
             },
-            settings: async ({ signal }) => {
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
-                const close = await options.settings(signal);
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
-                if (close) return { kind: "close" };
-                if (!draftChanged) {
-                    selectedNames.clear();
-                    for (const name of options.getSelectedNames()) selectedNames.add(name);
-                }
-                return { kind: "stay" };
+            settings: async () => {
+                if (current()) await options.settings(signal);
+                return { kind: "rejected" as const };
             },
         },
     });
-    await runMenu(ctx, menu, {
-        getState: () => undefined,
-        signal: options.signal,
-        isCurrent: options.isCurrent,
-    });
+    await runMenu(ctx, menu, { getState: () => undefined, signal, isCurrent: current });
 }

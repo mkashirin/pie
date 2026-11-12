@@ -1,19 +1,15 @@
-import { randomUUID } from "node:crypto";
-import { constants } from "node:fs";
-import { mkdir, open, rename, rm, writeFile } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@pi-extensions/tui";
+import { randomUUID } from "node:crypto";
+import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
+import { dirname, join, resolve } from "node:path";
 import {
     type ImplementationModelOverride,
     isPendingImplementationModelIdentifier,
 } from "./implementation-models.ts";
 import type { SafeSubcommands } from "./tool-policy.ts";
 
-// Preserve existing preferences across the local package rename.
 export const PLAN_MODE_SETTINGS_FILE = "pi-plan-mode.json";
-const LEGACY_PLAN_MODE_SETTINGS_FILE = "plan-mode.json";
-const MAX_SETTINGS_BYTES = 64 * 1024;
 export const PLAN_MODE_THINKING_LEVELS = [
     "inherit",
     "off",
@@ -39,65 +35,10 @@ export const IMPLEMENTATION_PLAN_RETENTIONS = [
     "keep",
 ] as const;
 export const DEFAULT_PLAN_EXPORT_PATH = "PLAN.md";
-const MODIFIERS = new Set(["ctrl", "shift", "alt", "super"]);
-const BASE_KEYS = new Set([
-    ..."abcdefghijklmnopqrstuvwxyz0123456789",
-    "`",
-    "-",
-    "=",
-    "[",
-    "]",
-    "\\",
-    ";",
-    "'",
-    ",",
-    ".",
-    "/",
-    "!",
-    "@",
-    "#",
-    "$",
-    "%",
-    "^",
-    "&",
-    "*",
-    "(",
-    ")",
-    "_",
-    "+",
-    "|",
-    "~",
-    "{",
-    "}",
-    ":",
-    "<",
-    ">",
-    "?",
-    "escape",
-    "esc",
-    "enter",
-    "return",
-    "tab",
-    "space",
-    "backspace",
-    "delete",
-    "insert",
-    "clear",
-    "home",
-    "end",
-    "pageup",
-    "pagedown",
-    "up",
-    "down",
-    "left",
-    "right",
-    ...Array.from({ length: 12 }, (_unused, index) => `f${index + 1}`),
-]);
-const MAX_PLAN_EXPORT_PATH_LENGTH = 4096;
-
 export type PlanModeThinkingLevel = (typeof PLAN_MODE_THINKING_LEVELS)[number];
 export type ImplementationPlanRetention = (typeof IMPLEMENTATION_PLAN_RETENTIONS)[number];
 export type PlanModeFixedThinkingLevel = (typeof IMPLEMENTATION_THINKING_LEVELS)[number];
+
 export interface PlanModeSettings {
     thinkingLevel: PlanModeThinkingLevel;
     defaultPlanTools?: string[];
@@ -128,455 +69,236 @@ export type PlanModeSettingsLoadResult =
     | { kind: "invalid"; reason: string; notice?: string }
     | { kind: "loaded"; settings: PlanModeSettings; notice?: string };
 
-type SettingsDocument = Record<string, unknown>;
-type SettingsSnapshot = {
-    result: PlanModeSettingsLoadResult;
-    document?: SettingsDocument;
-};
+const MAX_DOCUMENT_BYTES = 1024 * 1024;
+const writes = new Map<string, Promise<unknown>>();
+const record = (value: unknown): value is Record<string, unknown> =>
+    value !== null && typeof value === "object" && !Array.isArray(value);
+const member = <T extends string>(values: readonly T[], value: unknown): value is T =>
+    typeof value === "string" && values.includes(value as T);
 
-const mutationQueues = new Map<string, Promise<void>>();
-
-export function planModeSettingsPath() {
+export function planModeSettingsPath(): string {
     return join(getAgentDir(), PLAN_MODE_SETTINGS_FILE);
 }
 
-function legacyPlanModeSettingsPath() {
-    return join(getAgentDir(), LEGACY_PLAN_MODE_SETTINGS_FILE);
+export function normalizeKeyId(value: unknown): KeyId | undefined {
+    if (typeof value !== "string" || value.length > 100) return undefined;
+    const parts = value.toLowerCase().split("+");
+    const key = parts.pop();
+    const modifiers = new Set(parts);
+    if (
+        modifiers.size !== parts.length
+        || parts.some((part) => !["ctrl", "alt", "shift", "super", "meta", "hyper"].includes(part))
+    ) return undefined;
+    if (
+        !key
+        || !/^(?:[a-z0-9]|f(?:[1-9]|1[0-9]|2[0-4])|escape|enter|tab|space|backspace|delete|insert|home|end|pageup|pagedown|up|down|left|right|[\[\]\\/.,;='`\-])$/u
+            .test(key)
+    ) {
+        return undefined;
+    }
+    return [...parts, key].join("+") as KeyId;
 }
 
 export function normalizePlanModeSettings(value: unknown): PlanModeSettings | undefined {
-    if (!isSettingsDocument(value)) return undefined;
-    const thinkingLevel = Object.hasOwn(value, "thinkingLevel")
-        ? Reflect.get(value, "thinkingLevel")
-        : "inherit";
-    if (!PLAN_MODE_THINKING_LEVELS.includes(thinkingLevel as PlanModeThinkingLevel)) {
-        return undefined;
+    if (!record(value)) return undefined;
+    const result: PlanModeSettings = { thinkingLevel: "inherit" };
+    if (value.thinkingLevel !== undefined) {
+        if (!member(PLAN_MODE_THINKING_LEVELS, value.thinkingLevel)) return undefined;
+        result.thinkingLevel = value.thinkingLevel;
     }
-    const settings: PlanModeSettings = {
-        thinkingLevel: thinkingLevel as PlanModeThinkingLevel,
-    };
-    if (Object.hasOwn(value, "defaultPlanTools")) {
-        const defaultPlanTools = normalizeToolNames(Reflect.get(value, "defaultPlanTools"));
-        if (!defaultPlanTools) return undefined;
-        settings.defaultPlanTools = defaultPlanTools;
-    }
-    if (Object.hasOwn(value, "implementationPlanRetention")) {
-        const implementationPlanRetention = Reflect.get(value, "implementationPlanRetention");
+    if (value.defaultPlanTools !== undefined) {
         if (
-            !IMPLEMENTATION_PLAN_RETENTIONS.includes(
-                implementationPlanRetention as ImplementationPlanRetention,
+            !Array.isArray(value.defaultPlanTools) || value.defaultPlanTools.length > 10000
+            || value.defaultPlanTools.some((name) =>
+                typeof name !== "string" || !name.trim() || name.length > 1024
+                || /[\x00-\x1f\x7f]/u.test(name)
             )
-        ) {
+        ) return undefined;
+        result.defaultPlanTools = [...new Set(value.defaultPlanTools as string[])];
+    }
+    if (value.implementationPlanRetention !== undefined) {
+        if (!member(IMPLEMENTATION_PLAN_RETENTIONS, value.implementationPlanRetention)) {
             return undefined;
         }
-        settings.implementationPlanRetention =
-            implementationPlanRetention as ImplementationPlanRetention;
+        result.implementationPlanRetention = value.implementationPlanRetention;
     }
-    if (Object.hasOwn(value, "defaultImplementationModel")) {
-        const defaultImplementationModel = normalizeImplementationModel(
-            Reflect.get(value, "defaultImplementationModel"),
-        );
-        if (!defaultImplementationModel) return undefined;
-        settings.defaultImplementationModel = defaultImplementationModel;
-    }
-    if (Object.hasOwn(value, "defaultImplementationThinkingLevel")) {
-        const defaultImplementationThinkingLevel = Reflect.get(
-            value,
-            "defaultImplementationThinkingLevel",
-        );
+    if (value.defaultImplementationModel !== undefined) {
+        const model = value.defaultImplementationModel;
         if (
-            !IMPLEMENTATION_THINKING_LEVELS.includes(
-                defaultImplementationThinkingLevel as PlanModeFixedThinkingLevel,
-            )
-        ) {
+            !record(model) || !isPendingImplementationModelIdentifier(model.provider)
+            || !isPendingImplementationModelIdentifier(model.modelId)
+        ) return undefined;
+        result.defaultImplementationModel = { provider: model.provider, modelId: model.modelId };
+    }
+    if (value.defaultImplementationThinkingLevel !== undefined) {
+        if (!member(IMPLEMENTATION_THINKING_LEVELS, value.defaultImplementationThinkingLevel)) {
             return undefined;
         }
-        settings.defaultImplementationThinkingLevel =
-            defaultImplementationThinkingLevel as PlanModeFixedThinkingLevel;
+        result.defaultImplementationThinkingLevel = value.defaultImplementationThinkingLevel;
     }
-    if (Object.hasOwn(value, "defaultPlanExportPath")) {
-        const defaultPlanExportPath = normalizePlanExportPath(
-            Reflect.get(value, "defaultPlanExportPath"),
-        );
-        if (!defaultPlanExportPath) return undefined;
-        settings.defaultPlanExportPath = defaultPlanExportPath;
-    }
-    if (Object.hasOwn(value, "toggleShortcut")) {
-        const toggleShortcut = normalizeKeyId(Reflect.get(value, "toggleShortcut"));
-        if (!toggleShortcut) return undefined;
-        settings.toggleShortcut = toggleShortcut;
-    }
-    if (Object.hasOwn(value, "safeSubcommands")) {
-        const safeSubcommands = normalizeSafeSubcommands(Reflect.get(value, "safeSubcommands"));
-        if (!safeSubcommands) return undefined;
-        settings.safeSubcommands = safeSubcommands;
-    }
-    return settings;
-}
-
-function normalizeImplementationModel(value: unknown): ImplementationModelOverride | undefined {
-    if (
-        !isSettingsDocument(value)
-        || Object.keys(value).some((key) => key !== "provider" && key !== "modelId")
-    ) {
-        return undefined;
-    }
-    const provider = typeof value.provider === "string" ? value.provider.trim() : value.provider;
-    const modelId = typeof value.modelId === "string" ? value.modelId.trim() : value.modelId;
-    if (
-        !isPendingImplementationModelIdentifier(provider)
-        || !isPendingImplementationModelIdentifier(modelId)
-    ) {
-        return undefined;
-    }
-    return { provider, modelId };
-}
-
-function normalizeToolNames(value: unknown) {
-    if (
-        !Array.isArray(value)
-        || !value.every((item): item is string =>
-            typeof item === "string" && item.trim().length > 0
-        )
-    ) {
-        return undefined;
-    }
-    return Array.from(new Set(value));
-}
-
-function normalizePlanExportPath(value: unknown) {
-    if (typeof value !== "string") return undefined;
-    const normalized = value.trim();
-    if (
-        !normalized
-        || normalized.length > MAX_PLAN_EXPORT_PATH_LENGTH
-        || !/[^@\s]/u.test(normalized)
-        || [...normalized].some((character) => {
-            const codePoint = character.codePointAt(0) ?? 0;
-            return codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f);
-        })
-    ) {
-        return undefined;
-    }
-    return normalized;
-}
-
-export function normalizeKeyId(value: unknown): KeyId | undefined {
-    if (typeof value !== "string") return undefined;
-    const normalized = value.trim().toLowerCase();
-    const base = [...BASE_KEYS]
-        .sort((left, right) => right.length - left.length)
-        .find((candidate) => normalized === candidate || normalized.endsWith(`+${candidate}`));
-    if (!base) return undefined;
-    const prefix = normalized.slice(0, normalized.length - base.length);
-    if (!prefix) return base as KeyId;
-    if (/^f(?:[1-9]|1[0-2])$/.test(base) || !prefix.endsWith("+")) return undefined;
-    const modifiers = prefix.slice(0, -1).split("+");
-    if (
-        modifiers.length === 0
-        || modifiers.some((modifier) => !MODIFIERS.has(modifier))
-        || new Set(modifiers).size !== modifiers.length
-    ) {
-        return undefined;
-    }
-    return normalized as KeyId;
-}
-
-function normalizeSafeSubcommands(value: unknown): SafeSubcommands | undefined {
-    if (!isSettingsDocument(value)) return undefined;
-    const entries: [string, string[]][] = [];
-    for (const [command, subcommands] of Object.entries(value)) {
-        const normalizedCommand = command.trim();
+    if (value.defaultPlanExportPath !== undefined) {
         if (
-            !normalizedCommand
-            || !Array.isArray(subcommands)
-            || !subcommands.every((item): item is string =>
-                typeof item === "string" && item.trim().length > 0
-            )
-        ) {
-            return undefined;
-        }
-        const normalizedSubcommands = Array.from(
-            new Set(subcommands.map((subcommand) => subcommand.trim())),
-        );
-        const existing = entries.find(([existingCommand]) => existingCommand === normalizedCommand);
-        if (existing) existing[1] = Array.from(new Set([...existing[1], ...normalizedSubcommands]));
-        else entries.push([normalizedCommand, normalizedSubcommands]);
+            typeof value.defaultPlanExportPath !== "string" || !value.defaultPlanExportPath.trim()
+            || value.defaultPlanExportPath.length > 4096
+            || value.defaultPlanExportPath.includes("\0")
+        ) return undefined;
+        result.defaultPlanExportPath = value.defaultPlanExportPath.trim();
     }
-    return Object.fromEntries(entries);
+    if (value.toggleShortcut !== undefined) {
+        const key = normalizeKeyId(value.toggleShortcut);
+        if (!key) return undefined;
+        result.toggleShortcut = key;
+    }
+    if (value.safeSubcommands !== undefined) {
+        if (!record(value.safeSubcommands)) return undefined;
+        const safe: SafeSubcommands = Object.create(null);
+        for (const [command, paths] of Object.entries(value.safeSubcommands)) {
+            if (
+                !/^[a-zA-Z0-9_-]+$/u.test(command) || !Array.isArray(paths)
+                || paths.some((path) =>
+                    typeof path !== "string" || !/^[a-zA-Z0-9_-]+(?: [a-zA-Z0-9_-]+)*$/u.test(path)
+                )
+            ) return undefined;
+            safe[command] = [...new Set(paths as string[])];
+        }
+        result.safeSubcommands = safe;
+    }
+    return result;
+}
+
+async function documentAt(path: string): Promise<Record<string, unknown> | undefined> {
+    try {
+        if ((await stat(path)).size > MAX_DOCUMENT_BYTES) {
+            throw new Error("Settings file is too large");
+        }
+        const text = await readFile(path, "utf8");
+        if (Buffer.byteLength(text) > MAX_DOCUMENT_BYTES) {
+            throw new Error("Settings file is too large");
+        }
+        const value: unknown = JSON.parse(text);
+        if (!record(value) || !normalizePlanModeSettings(value)) {
+            throw new Error("Invalid Plan Mode settings document");
+        }
+        return value;
+    } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+        throw error;
+    }
 }
 
 export async function readPlanModeSettings(
-    settingsPath?: string,
+    settingsPath = planModeSettingsPath(),
 ): Promise<PlanModeSettingsLoadResult> {
-    if (settingsPath) {
-        await awaitPlanModeSettingsWrites(settingsPath);
-        return (await readSettingsSnapshot(settingsPath)).result;
-    }
-    const canonicalPath = planModeSettingsPath();
-    await awaitPlanModeSettingsWrites(canonicalPath);
-    const canonical = await readSettingsSnapshot(canonicalPath);
-    const legacyPath = legacyPlanModeSettingsPath();
-    if (canonical.result.kind !== "missing") {
-        return (await pathExists(legacyPath))
-            ? {
-                ...canonical.result,
-                notice: `${LEGACY_PLAN_MODE_SETTINGS_FILE}`
-                    + " ignored because "
-                    + `${PLAN_MODE_SETTINGS_FILE}`
-                    + " takes precedence.",
-            }
-            : canonical.result;
-    }
-
-    const legacy = await readSettingsSnapshot(legacyPath);
-    const raced = await readSettingsSnapshot(canonicalPath);
-    if (raced.result.kind !== "missing") return raced.result;
-    return legacy.result.kind === "loaded"
-        ? {
-            ...legacy.result,
-            notice: "Using legacy "
-                + `${LEGACY_PLAN_MODE_SETTINGS_FILE}`
-                + "; rename it to "
-                + `${PLAN_MODE_SETTINGS_FILE}`
-                + ". The legacy file was not modified.",
+    try {
+        let document = await documentAt(settingsPath);
+        let notice: string | undefined;
+        if (!document) {
+            document = await documentAt(join(dirname(settingsPath), "plan-mode.json"));
+            if (document) notice = "Using legacy plan-mode.json settings.";
         }
-        : legacy.result;
+        return document
+            ? { kind: "loaded", settings: normalizePlanModeSettings(document)!, notice }
+            : { kind: "missing" };
+    } catch (error) {
+        return { kind: "invalid", reason: error instanceof Error ? error.message : String(error) };
+    }
 }
 
 export function updatePlanModeSettings(
     patch: PlanModeSettingsPatch,
     options: UpdatePlanModeSettingsOptions = {},
 ): Promise<PlanModeSettings> {
-    const settingsPath = options.settingsPath ?? planModeSettingsPath();
-    const legacySettingsPath = options.legacySettingsPath
-        ?? (options.settingsPath ? undefined : legacyPlanModeSettingsPath());
-    return enqueueMutation(settingsPath, async () => {
-        options.signal?.throwIfAborted();
-        const current = await readSettingsDocumentForUpdate(settingsPath, legacySettingsPath);
-        const updated: SettingsDocument = { ...current };
-        if (patch.thinkingLevel !== undefined) updated.thinkingLevel = patch.thinkingLevel;
-        if (patch.defaultPlanTools === null) delete updated.defaultPlanTools;
-        else if (patch.defaultPlanTools !== undefined) {
-            updated.defaultPlanTools = [...patch.defaultPlanTools];
-        }
-        if (patch.implementationPlanRetention !== undefined) {
-            updated.implementationPlanRetention = patch.implementationPlanRetention;
-        }
-        if (patch.defaultImplementationModel === null) delete updated.defaultImplementationModel;
-        else if (patch.defaultImplementationModel !== undefined) {
-            const model = normalizeImplementationModel(patch.defaultImplementationModel);
-            if (!model) throw invalidSettingsError(settingsPath, "invalid implementation model");
-            updated.defaultImplementationModel = model;
-        }
-        if (patch.defaultImplementationThinkingLevel === null) {
-            delete updated.defaultImplementationThinkingLevel;
-        } else if (patch.defaultImplementationThinkingLevel !== undefined) {
-            updated.defaultImplementationThinkingLevel = patch.defaultImplementationThinkingLevel;
-        }
-        if (patch.defaultPlanExportPath === null) delete updated.defaultPlanExportPath;
-        else if (patch.defaultPlanExportPath !== undefined) {
-            updated.defaultPlanExportPath = patch.defaultPlanExportPath;
-        }
-        if (patch.toggleShortcut === null) delete updated.toggleShortcut;
-        else if (patch.toggleShortcut !== undefined) {
-            updated.toggleShortcut = patch.toggleShortcut;
-        }
-        const settings = normalizePlanModeSettings(updated);
-        if (!settings) throw invalidSettingsError(settingsPath, "invalid settings shape");
-        await publishSettings(settingsPath, updated, options.signal, options.beforeRename);
-        return settings;
-    });
+    const path = resolve(options.settingsPath ?? planModeSettingsPath());
+    // The local queue also makes awaitPlanModeSettingsWrites observe reads and pre-publication work.
+    const operation = (writes.get(path) ?? Promise.resolve()).catch(() => {}).then(() =>
+        withFileMutationQueue(path, async () => {
+            options.signal?.throwIfAborted();
+            const previous = await documentAt(path)
+                ?? await documentAt(
+                    options.legacySettingsPath ?? join(dirname(path), "plan-mode.json"),
+                )
+                ?? {};
+            const next = { ...previous };
+            const keys = [
+                "thinkingLevel",
+                "defaultPlanTools",
+                "implementationPlanRetention",
+                "defaultImplementationModel",
+                "defaultImplementationThinkingLevel",
+                "defaultPlanExportPath",
+                "toggleShortcut",
+            ] as const;
+            for (const key of keys) {
+                if (!Object.hasOwn(patch, key) || patch[key] === undefined) continue;
+                if (patch[key] === null) delete next[key];
+                else next[key] = patch[key];
+            }
+            const normalized = normalizePlanModeSettings(next);
+            if (!normalized) throw new Error("Invalid Plan Mode settings update");
+            const serialized = JSON.stringify(next, null, 4) + "\n";
+            if (Buffer.byteLength(serialized) > MAX_DOCUMENT_BYTES) {
+                throw new Error("Settings file is too large");
+            }
+            options.signal?.throwIfAborted();
+            await mkdir(dirname(path), { recursive: true });
+            const temporary = join(
+                dirname(path),
+                `.${PLAN_MODE_SETTINGS_FILE}.${randomUUID()}.tmp`,
+            );
+            try {
+                const file = await open(temporary, "wx", 0o600);
+                try {
+                    await file.writeFile(serialized, "utf8");
+                    await file.sync();
+                } finally {
+                    await file.close();
+                }
+                await options.beforeRename?.(temporary, path);
+                options.signal?.throwIfAborted();
+                await rename(temporary, path);
+                return normalized;
+            } finally {
+                await unlink(temporary).catch((error: NodeJS.ErrnoException) => {
+                    if (error.code !== "ENOENT") throw error;
+                });
+            }
+        })
+    );
+    writes.set(path, operation);
+    void operation.finally(() => {
+        if (writes.get(path) === operation) writes.delete(path);
+    }).catch(() => {});
+    return operation;
 }
 
 export async function awaitPlanModeSettingsWrites(
     settingsPath = planModeSettingsPath(),
 ): Promise<void> {
-    await mutationQueues.get(settingsPath);
+    await writes.get(resolve(settingsPath));
 }
-
-function enqueueMutation<T>(settingsPath: string, mutation: () => Promise<T>): Promise<T> {
-    const previous = mutationQueues.get(settingsPath) ?? Promise.resolve();
-    const result = previous.then(mutation, mutation);
-    const settled = result.then(
-        () => undefined,
-        () => undefined,
-    );
-    mutationQueues.set(settingsPath, settled);
-    void settled.finally(() => {
-        if (mutationQueues.get(settingsPath) === settled) mutationQueues.delete(settingsPath);
-    });
-    return result;
-}
-
-async function readSettingsDocumentForUpdate(
-    settingsPath: string,
-    legacySettingsPath: string | undefined,
-): Promise<SettingsDocument> {
-    const canonical = await readSettingsSnapshot(settingsPath);
-    if (canonical.result.kind === "loaded") return canonical.document ?? {};
-    if (canonical.result.kind === "invalid") {
-        throw invalidSettingsError(settingsPath, canonical.result.reason);
-    }
-    if (!legacySettingsPath) return {};
-
-    const legacy = await readSettingsSnapshot(legacySettingsPath);
-    const raced = await readSettingsSnapshot(settingsPath);
-    if (raced.result.kind === "loaded") return raced.document ?? {};
-    if (raced.result.kind === "invalid") {
-        throw invalidSettingsError(settingsPath, raced.result.reason);
-    }
-    if (legacy.result.kind === "invalid") {
-        throw invalidSettingsError(legacySettingsPath, legacy.result.reason);
-    }
-    return legacy.document ?? {};
-}
-
-async function readSettingsSnapshot(settingsPath: string): Promise<SettingsSnapshot> {
-    let contents: string;
-    try {
-        contents = await readSettingsContents(settingsPath);
-    } catch (error: unknown) {
-        if (isNodeError(error) && error.code === "ENOENT") return { result: { kind: "missing" } };
-        return { result: { kind: "invalid", reason: safeReadError(error) } };
-    }
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(contents) as unknown;
-    } catch {
-        return { result: { kind: "invalid", reason: "invalid JSON" } };
-    }
-    const settings = normalizePlanModeSettings(parsed);
-    if (!settings || !isSettingsDocument(parsed)) {
-        return { result: { kind: "invalid", reason: "invalid settings shape" } };
-    }
-    return { document: parsed, result: { kind: "loaded", settings } };
-}
-
-async function readSettingsContents(settingsPath: string): Promise<string> {
-    const flags = constants.O_RDONLY | (constants.O_NONBLOCK ?? 0) | (constants.O_NOFOLLOW ?? 0);
-    const handle = await open(settingsPath, flags);
-    try {
-        const stats = await handle.stat();
-        if (!stats.isFile()) throw new Error("settings path is not a regular file");
-        if (stats.size > MAX_SETTINGS_BYTES) {
-            throw new Error(`settings file exceeds ${MAX_SETTINGS_BYTES} bytes`);
-        }
-        const buffer = Buffer.alloc(MAX_SETTINGS_BYTES + 1);
-        let offset = 0;
-        while (offset < buffer.byteLength) {
-            const { bytesRead } = await handle.read(
-                buffer,
-                offset,
-                buffer.byteLength - offset,
-                offset,
-            );
-            if (bytesRead === 0) break;
-            offset += bytesRead;
-        }
-        if (offset > MAX_SETTINGS_BYTES) {
-            throw new Error(`settings file exceeds ${MAX_SETTINGS_BYTES} bytes`);
-        }
-        try {
-            return new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(
-                buffer.subarray(0, offset),
-            );
-        } catch {
-            throw new Error("settings file is not valid UTF-8");
-        }
-    } finally {
-        await handle.close();
-    }
-}
-
-async function publishSettings(
-    settingsPath: string,
-    document: SettingsDocument,
-    signal?: AbortSignal,
-    beforeRename?: (temporaryPath: string, settingsPath: string) => Promise<void>,
-): Promise<void> {
-    signal?.throwIfAborted();
-    const contents = `${JSON.stringify(document, null, 2)}\n`;
-    if (Buffer.byteLength(contents, "utf8") > MAX_SETTINGS_BYTES) {
-        throw new Error(`settings document exceeds ${MAX_SETTINGS_BYTES} bytes`);
-    }
-    const directory = dirname(settingsPath);
-    await mkdir(directory, { recursive: true });
-    signal?.throwIfAborted();
-    const temporaryPath = join(
-        directory,
-        `.${basename(settingsPath)}.${process.pid}.${randomUUID()}.tmp`,
-    );
-    try {
-        await writeFile(temporaryPath, contents, {
-            encoding: "utf8",
-            flag: "wx",
-            mode: 0o600,
-            signal,
-        });
-        await beforeRename?.(temporaryPath, settingsPath);
-        signal?.throwIfAborted();
-        await rename(temporaryPath, settingsPath);
-    } finally {
-        await rm(temporaryPath, { force: true }).catch(() => undefined);
-    }
-}
-
-function isSettingsDocument(value: unknown): value is SettingsDocument {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-async function pathExists(path: string) {
-    try {
-        const handle = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
-        await handle.close();
-        return true;
-    } catch (error: unknown) {
-        return !(isNodeError(error) && error.code === "ENOENT");
-    }
-}
-
-function invalidSettingsError(settingsPath: string, reason: string) {
-    return new Error(`pi-plan settings at ${settingsPath} are invalid: ${reason}`);
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-    return error instanceof Error && "code" in error;
-}
-
-function safeReadError(error: unknown) {
-    if (isNodeError(error) && error.code === "ELOOP") return "settings path is not a regular file";
-    return error instanceof Error ? error.message : String(error);
-}
-
 export function configuredThinkingLevel(
     settings: PlanModeSettings,
 ): PlanModeFixedThinkingLevel | undefined {
     return settings.thinkingLevel === "inherit" ? undefined : settings.thinkingLevel;
 }
-
 export function configuredImplementationPlanRetention(
     settings: PlanModeSettings,
 ): ImplementationPlanRetention {
-    return settings.implementationPlanRetention ?? "clear-on-start";
+    return settings.implementationPlanRetention ?? "clear-after-first-run";
 }
-
 export function configuredImplementationModel(
     settings: PlanModeSettings,
 ): ImplementationModelOverride | undefined {
     return settings.defaultImplementationModel;
 }
-
 export function configuredImplementationThinkingLevel(
     settings: PlanModeSettings,
 ): PlanModeFixedThinkingLevel | undefined {
     return settings.defaultImplementationThinkingLevel;
 }
-
-export function configuredPlanExportPath(settings: PlanModeSettings) {
+export function configuredPlanExportPath(settings: PlanModeSettings): string {
     return settings.defaultPlanExportPath ?? DEFAULT_PLAN_EXPORT_PATH;
 }
-
 export function configuredPlanModeToggleShortcut(settings: PlanModeSettings): KeyId | undefined {
     return settings.toggleShortcut;
 }

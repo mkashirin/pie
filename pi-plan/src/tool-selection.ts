@@ -1,61 +1,66 @@
 import type { ToolInfo } from "@earendil-works/pi-coding-agent";
-import { classifyPlanModeTool, isBuiltinTool, SAFE_BUILTIN_PLAN_TOOLS } from "./tool-policy.ts";
+import { canSelectToolInPlanMode, classifyPlanModeTool, isBuiltinTool } from "./tool-policy.ts";
 
-export function toolNameFromLegacyKey(key: string, tools: ToolInfo[]) {
-    const directName = tools.find((tool) => tool.name === key)?.name;
-    if (directName) return directName;
-    const [name] = key.split("\u001f");
-    return tools.find((tool) => tool.name === name) ? name : undefined;
+export function toolNameFromLegacyKey(key: string, tools: ToolInfo[]): string | undefined {
+    const direct = tools.find((tool) => tool.name === key);
+    if (direct) return direct.name;
+    // Historical selections qualified a name with provenance. Never resolve an ambiguous suffix.
+    const matches = tools.filter((tool) => {
+        const source = tool.sourceInfo;
+        return [source?.source, source?.path].filter(Boolean).some((prefix) =>
+            key === `${prefix}:${tool.name}` || key === `${prefix}::${tool.name}`
+        );
+    });
+    return matches.length === 1 ? matches[0]!.name : undefined;
 }
-
-export function compareTools(left: ToolInfo, right: ToolInfo) {
-    const leftBuiltin = isBuiltinTool(left);
-    const rightBuiltin = isBuiltinTool(right);
-    if (leftBuiltin !== rightBuiltin) return leftBuiltin ? -1 : 1;
-    return left.name.localeCompare(right.name);
+export function compareTools(left: ToolInfo, right: ToolInfo): number {
+    return Number(isBuiltinTool(right)) - Number(isBuiltinTool(left))
+        || left.name.localeCompare(right.name);
 }
-
-export function toolPolicyLabel(tool: ToolInfo) {
-    const policy = classifyPlanModeTool(tool);
-    if (policy === "read-only") return "built-in read-only";
-    if (policy === "limited") return "built-in limited";
-    if (policy === "blocked") return "built-in blocked";
-    return `user opt-in: ${toolSourceLabel(tool)}`;
+export function toolPolicyLabel(tool: ToolInfo): string {
+    switch (classifyPlanModeTool(tool)) {
+        case "read-only":
+            return "Read-only";
+        case "limited":
+            return "Limited · read-only commands";
+        case "user-opt-in":
+            return "User opt-in · runs at your risk";
+        case "blocked":
+            return "Blocked in Plan Mode";
+    }
 }
-
-function toolSourceLabel(tool: ToolInfo) {
-    const sourceInfo = tool.sourceInfo;
-    const source = `${sourceInfo.scope}/${sourceInfo.source}`;
-    return sourceInfo.path ? `${source} ${sourceInfo.path}` : source;
+export function unique(values: string[]): string[] {
+    return [...new Set(values)];
 }
-
-export function unique(values: string[]) {
-    return Array.from(new Set(values));
+export function defaultPlanModeToolNames(
+    tools: ToolInfo[],
+    configuredNames: string[] | undefined,
+): string[] {
+    const available = tools.filter(canSelectToolInPlanMode);
+    if (configuredNames !== undefined) {
+        const names = new Set(available.map((tool) => tool.name));
+        return unique(configuredNames).filter((name) => names.has(name));
+    }
+    return unique(available.filter(isBuiltinTool).map((tool) => tool.name));
 }
-
-export function defaultPlanModeToolNames(tools: ToolInfo[], configuredNames: string[] | undefined) {
-    if (configuredNames !== undefined) return unique(configuredNames);
-    return tools.filter((tool) => isBuiltinTool(tool) && SAFE_BUILTIN_PLAN_TOOLS.has(tool.name))
-        .map((tool) => tool.name);
-}
-
 interface PlanModeToolSelectionSnapshot {
     selectedToolNames?: string[];
     selectedToolKeys?: string[];
     defaultPlanTools?: string[];
 }
-
 export function snapshotPlanModeSelectedNames(
     tools: ToolInfo[],
     selection: PlanModeToolSelectionSnapshot,
-) {
-    const selectedToolNames = selection.selectedToolNames
-        ?? selection.selectedToolKeys
-            ?.map((key) => toolNameFromLegacyKey(key, tools))
-            .filter((name): name is string => name !== undefined);
-    return new Set(
-        selectedToolNames === undefined
-            ? defaultPlanModeToolNames(tools, selection.defaultPlanTools)
-            : unique(selectedToolNames),
-    );
+): Set<string> {
+    if (selection.selectedToolNames !== undefined) {
+        return new Set(defaultPlanModeToolNames(tools, selection.selectedToolNames));
+    }
+    if (selection.selectedToolKeys !== undefined) {
+        return new Set(defaultPlanModeToolNames(
+            tools,
+            selection.selectedToolKeys.map((key) => toolNameFromLegacyKey(key, tools))
+                .filter((name): name is string => name !== undefined),
+        ));
+    }
+    return new Set(defaultPlanModeToolNames(tools, selection.defaultPlanTools));
 }

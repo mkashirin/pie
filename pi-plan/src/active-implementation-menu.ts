@@ -17,54 +17,51 @@ interface ActiveImplementationMenuOptions {
 export async function showActiveImplementationMenu(
     ctx: ExtensionContext,
     options: ActiveImplementationMenuOptions,
-) {
-    type Screen = "active" | "export";
-    type Action = "show" | "export" | "settings" | "start-new" | "clear";
-    const menu = defineMenu<undefined, Screen, Action, ExtensionContext>({
-        start: "active",
-        screens: {
-            active: () => ({
-                kind: "actions",
-                title: "Active implementation plan",
-                lines: [options.statusText],
-                items: [
-                    { id: "show", label: "Show active implementation plan", action: "show" },
-                    { id: "export", label: "Export plan...", to: "export" },
-                    { id: "settings", label: "Settings", action: "settings" },
-                    { id: "start-new", label: "Start a new plan", action: "start-new" },
-                    { id: "clear", label: "Clear active implementation plan", action: "clear" },
-                ],
-                hint: "close",
-            }),
-            export: () => planExportInputScreen(options.getExportDestination),
-        },
-        actions: {
-            show: async () => {
-                options.show();
-                return { kind: "close" };
+): Promise<void> {
+    const signal = options.signal ?? new AbortController().signal;
+    const current = () => !signal.aborted && options.isCurrent();
+    const close = (run: () => void) => () => {
+        if (!current()) return { kind: "rejected" as const };
+        run();
+        return { kind: "close" as const };
+    };
+    await runMenu(
+        ctx,
+        defineMenu({
+            start: "main",
+            screens: {
+                main: () => ({
+                    kind: "actions" as const,
+                    title: "Active implementation",
+                    lines: [options.statusText],
+                    items: [
+                        { id: "show", label: "Show implementation plan", action: "show" },
+                        { id: "export", label: "Export plan...", to: "export" },
+                        { id: "settings", label: "Settings", action: "settings" },
+                        { id: "new", label: "Start a new plan", action: "startNew" },
+                        { id: "clear", label: "Clear implementation plan", action: "clear" },
+                    ],
+                }),
+                export: () => planExportInputScreen(options.getExportDestination),
             },
-            export: async ({ value, signal }) =>
-                (await options.exportPlan(value ?? "", signal))
-                    ? { kind: "close" }
-                    : { kind: "rejected" },
-            settings: async ({ signal }) => {
-                const close = await options.settings(signal);
-                if (signal.aborted || !options.isCurrent()) return { kind: "rejected" };
-                return close ? { kind: "close" } : { kind: "stay" };
+            actions: {
+                show: () => {
+                    if (current()) options.show();
+                    return { kind: "rejected" as const };
+                },
+                clear: close(options.clear),
+                startNew: close(options.startNew),
+                settings: async () => {
+                    if (current()) await options.settings(signal);
+                    return { kind: "rejected" as const };
+                },
+                export: async ({ value }: { value?: string }) => ({
+                    kind: current() && await options.exportPlan(value ?? "", signal)
+                        ? "close" as const
+                        : "rejected" as const,
+                }),
             },
-            "start-new": async () => {
-                options.startNew();
-                return { kind: "close" };
-            },
-            clear: async () => {
-                options.clear();
-                return { kind: "close" };
-            },
-        },
-    });
-    await runMenu(ctx, menu, {
-        getState: () => undefined,
-        signal: options.signal,
-        isCurrent: options.isCurrent,
-    });
+        }),
+        { getState: () => undefined, signal, isCurrent: current },
+    );
 }

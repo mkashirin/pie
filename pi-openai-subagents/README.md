@@ -9,6 +9,47 @@ Children run **in process, in the same workspace**, not in containers or worktre
 delegate recursively, activate tools or change session settings. Tool policies and write-path
 ownership are trust/scheduling boundaries, **not an OS sandbox**.
 
+## Architecture and workflow
+
+The foreground owns every handoff. The extension validates and executes each requested batch; it
+does not choose a pipeline or let children launch other children. Read the main path from top to
+bottom; the loops at the bottom are **new foreground-issued calls**, not automatic retries.
+
+```mermaid
+flowchart TB
+    user["You: task, scope, and feedback"] --> foreground["Foreground Pi agent<br/>Normal model or optional orchestrator"]
+    foreground --> batchRequest["subagents_run(tasks)<br/>agent, task, context, tools<br/>inputs: IDs; writePaths: scope"]
+    config["Agent definitions + effective settings<br/>Pi session model/auth registry"] --> preflight
+
+    subgraph host["Extension host: bounded, in-process execution"]
+        batchRequest --> preflight["Validate every task before starting<br/>Assignments, input IDs, callable tools, paths"]
+        preflight --> scheduler["Scheduler<br/>Concurrency + write ownership<br/>Reviewers wait for writers"]
+        scheduler --> child["Agent per task, in process<br/>Own chat; shared workspace<br/>Instructions read at start"]
+        child --> policy["Role/tool policy + required consent<br/>Scoped edit/write ownership checks"]
+        policy --> tools["ctx.executeTool: parent tool bridge<br/>Validation + parent permission hooks<br/>Plan Mode retains veto"]
+        tools -->|"Tool result or denial"| child
+        child -->|"Settled outcome"| settlement["Record every outcome<br/>Validate agent_report and ID links<br/>Incomplete / failed / cancelled too"]
+        settlement --> ledger["Session-branch ledger<br/>Full reports/evidence + revisions<br/>Review/validation gaps"]
+        ledger --> result["Return run/evidence IDs<br/>Bounded text; full structured details"]
+        child -.->|"No retrieved payloads"| progress["Live progress / optional TUI fleet<br/>Activity + evidence metadata only"]
+    end
+
+    result --> next{"Foreground decides next step"}
+    next -->|"More work"| work["Next scoped task<br/>Scout / worker / researcher / custom<br/>Gardener is optional"]
+    next -->|"contextRequests"| context["Foreground: scout, then retry same agent<br/>inputs: request + scout + work IDs"]
+    next -->|"Review / validation"| checks["Reviewer: changed/uncertain work<br/>Research-validator: claims<br/>inputs: IDs"]
+    work --> batchRequest
+    context --> batchRequest
+    checks --> batchRequest
+    next -->|"Ready to answer"| answer["Foreground synthesizes your answer<br/>Disclose limits; completion is not proof"]
+```
+
+Solid arrows show execution and report flow; the dotted arrow is display-only progress. Each child
+receives its task, explicit context, and bounded copies of selected `inputs`—not the whole parent
+conversation or another child's transcript. Invalid batch setup starts no children; missing reports
+or context requests leave work incomplete. Cancellation and limits do not restart it. Gardener and
+follow-up stages are foreground decisions, never a mandatory automatic chain.
+
 ## Setup
 
 Requires Node >=22.19 and Pi host APIs; workspace development targets Pi 1.5.0. Follow

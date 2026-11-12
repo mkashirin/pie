@@ -7,7 +7,8 @@
 This is a source-only npm workspace bundle. The root `pi.extensions` manifest lists **six** Pi
 entrypoints; the private [`tui/`](tui.md) support package makes **seven** npm workspaces. It is not
 another extension. Pi supplies host peers at runtime. Development tooling pins the
-`@earendil-works` host APIs to **1.5.0**; Kit is pinned to **0.59.0**. There is no build step.
+`@earendil-works` host APIs to **1.5.0**. Shared interactions have no third-party Pi-extension
+runtime or type dependency. There is no build step.
 
 Keep shared, generic terminal presentation and menu/questionnaire interactions in `tui/`. Extension
 registrations, domain presenters, HEM's editor, Subagents' fleet, Plan's workflow, and Multi's
@@ -53,9 +54,9 @@ gate, not a certificate of real-terminal compatibility.
 ## What checks cover
 
 Most regression suites use `node:test` and local fixtures. Many source-loading tests use jiti;
-Multi also uses tsx. TypeScript uses strict NodeNext, direct source imports, and `noEmit`; Plan
-allows its interaction JavaScript at the typed adapter boundary, with behavior covered by runtime
-harnesses rather than `checkJs`.
+Multi also uses tsx. TypeScript uses strict NodeNext, direct source imports, and `noEmit`. Plan and
+shared interactions are fully TypeScript-checked and tested with local host-contract fixtures;
+public TUI consumption does not require `allowJs`.
 
 The installer suite, [`tests/install-scope.test.mjs`](../tests/install-scope.test.mjs), creates
 isolated fixtures and a stub npm executable. It checks local scope, argument handling, explicit
@@ -136,10 +137,10 @@ and live/manual results in handoffs. Do not claim coverage for checks that did n
 ## Releases
 
 The local release is **0.1.0**. Keep root and six extension release versions and their root
-lockfile entries in sync; the private TUI support package is not another extension release. Plan's
-source baseline **0.58.3**, Kit **0.59.0**, and dependency versions remain independent. Inspect
-manifests when changing release metadata rather than inferring versions from package names. Private
-package flags prevent accidental npm publication, not Git-based Pi installation.
+lockfile entries in sync; the private TUI support package is not another extension release.
+Dependency versions remain independent. Inspect manifests when changing release metadata rather
+than inferring versions from package names. Private package flags prevent accidental npm
+publication, not Git-based Pi installation.
 
 For a new remote, create an empty repository, add its URL as `origin`, and push the reviewed
 branch. After verification, an optional release tag is `v0.1.0`; create and push that tag before
@@ -148,7 +149,9 @@ a setup or verification step. HEM's prepack hook runs its checks; inspect its al
 name availability, registry contents, and `npm pack --dry-run` before any separately reviewed
 publication.
 
-Retain package LICENSE files and third-party notices. Plan source must not be replaced by compiled
-`dist/` or the full upstream Kit. See
+Retain package LICENSE files and ordinary dependency notices. Plan and shared interactions must
+remain local source implementations rather than copied third-party Pi extensions. See
 [Plan source update constraints](../pi-plan/docs/reference.md#source-updates) and
 [HEM notices](../pi-hem/THIRD_PARTY_NOTICES.md) before redistributing source or dependencies.
+Replacing an implementation does not relicense older revisions or the ordinary libraries shipped
+with an installation.

@@ -2,6 +2,7 @@
     "name": "pi-plan",
     "version": "0.1.0",
     "private": true,
+    "license": "MIT",
     "type": "module",
     "files": ["index.ts", "src", "LICENSE", "README.md"],
     "scripts": {

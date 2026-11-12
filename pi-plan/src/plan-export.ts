@@ -1,21 +1,18 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { stripVTControlCharacters } from "node:util";
 import { type ExtensionContext, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
+import { lstat, mkdir, open, unlink } from "node:fs/promises";
+import { homedir } from "node:os";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { DEFAULT_PLAN_EXPORT_PATH } from "./settings.ts";
 import type { PlanModeState } from "./state.ts";
 
 export { DEFAULT_PLAN_EXPORT_PATH };
-
 export interface PlanExportResult {
     path: string;
 }
-
 export interface PlanExportDestination {
     configuredPath: string;
     resolvedPath: string;
 }
-
 export interface PlanExportLifecycle {
     signal: AbortSignal;
     isCurrent(): boolean;
@@ -23,126 +20,123 @@ export interface PlanExportLifecycle {
     finishReady?(): void;
 }
 
+export function resolvePlanExportPath(
+    requestedPath: string | undefined,
+    cwd: string,
+    defaultPath = DEFAULT_PLAN_EXPORT_PATH,
+): string {
+    let path = (requestedPath ?? defaultPath).trim();
+    if (path.startsWith("@")) path = path.slice(1).trim();
+    if (!path || path.includes("\0")) {
+        throw new Error("Export path must not be empty or contain NUL.");
+    }
+    if (path === "~") path = homedir();
+    else if (path.startsWith("~/")) path = join(homedir(), path.slice(2));
+    return isAbsolute(path) ? resolve(path) : resolve(cwd, path);
+}
+export function planExportDestination(defaultPath: string, cwd: string): PlanExportDestination {
+    return {
+        configuredPath: defaultPath,
+        resolvedPath: resolvePlanExportPath(undefined, cwd, defaultPath),
+    };
+}
+function checkCurrent(signal?: AbortSignal, isCurrent?: () => boolean): void {
+    signal?.throwIfAborted();
+    if (isCurrent && !isCurrent()) {
+        throw new DOMException("Export owner is no longer current", "AbortError");
+    }
+}
+export async function exportPlanToFile(
+    plan: string,
+    requestedPath: string | undefined,
+    cwd: string,
+    signal?: AbortSignal,
+    isCurrent?: () => boolean,
+    defaultPath = DEFAULT_PLAN_EXPORT_PATH,
+): Promise<PlanExportResult> {
+    checkCurrent(signal, isCurrent);
+    if (!plan.trim()) throw new Error("There is no plan to export.");
+    const path = resolvePlanExportPath(requestedPath, cwd, defaultPath);
+    return withFileMutationQueue(path, async () => {
+        checkCurrent(signal, isCurrent);
+        await mkdir(dirname(path), { recursive: true });
+        checkCurrent(signal, isCurrent);
+        let file;
+        try {
+            file = await open(path, "wx");
+        } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+                throw new Error(`Export destination already exists: ${path}`);
+            }
+            throw error;
+        }
+        const identity = await file.stat();
+        let published = false;
+        try {
+            checkCurrent(signal, isCurrent);
+            await file.writeFile(plan.endsWith("\n") ? plan : plan + "\n", "utf8");
+            await file.sync();
+            checkCurrent(signal, isCurrent);
+            published = true;
+        } finally {
+            try {
+                await file.close();
+            } finally {
+                if (!published) {
+                    // Never remove a different file installed by an outside writer during rollback.
+                    const current = await lstat(path).catch((error: NodeJS.ErrnoException) => {
+                        if (error.code !== "ENOENT") throw error;
+                        return undefined;
+                    });
+                    if (current?.ino === identity.ino && current?.dev === identity.dev) {
+                        await unlink(path);
+                    }
+                }
+            }
+        }
+        return { path };
+    });
+}
 export async function exportStoredPlan(
     state: PlanModeState,
     requestedPath: string | undefined,
     ctx: ExtensionContext,
     lifecycle?: PlanExportLifecycle,
     defaultPath = DEFAULT_PLAN_EXPORT_PATH,
-) {
-    const plan = (state.enabled ? state.latestPlan : undefined)?.trim()
-        ?? state.savedPlan?.plan.trim()
-        ?? state.activeImplementation?.plan.trim();
+): Promise<boolean> {
+    const plan = state.awaitingAction
+        ? state.latestPlan
+        : state.savedPlan?.plan ?? state.activeImplementation?.plan;
     if (!plan) {
-        const error = new Error(
-            "No completed plan is available to export. Use /plan "
-                + "finalize when planning is complete.",
+        ctx.ui.notify(
+            "There is no completed, saved or active implementation plan to export.",
+            "warning",
         );
-        if (!ctx.hasUI) throw error;
-        ctx.ui.notify(error.message, "warning");
         return false;
     }
-
-    const isCurrent = () =>
-        !lifecycle
-        || (lifecycle.isCurrent() && (!lifecycle.getState || lifecycle.getState() === state));
-
-    let result: PlanExportResult;
     try {
-        result = await exportPlanToFile(
+        const result = await exportPlanToFile(
             plan,
             requestedPath,
             ctx.cwd,
-            lifecycle?.signal,
-            isCurrent,
+            lifecycle?.signal ?? ctx.signal,
+            lifecycle ? () => lifecycle.isCurrent() : undefined,
             defaultPath,
         );
-    } catch (error: unknown) {
-        if (lifecycle?.signal.aborted || !isCurrent()) return false;
-        if (!ctx.hasUI) throw error;
-        const detail = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(safeNotification(`Unable to export plan: ${detail}`), "error");
+        if (lifecycle && (!lifecycle.isCurrent() || lifecycle.signal.aborted)) return false;
+        const current = lifecycle?.getState?.() ?? state;
+        if (state.awaitingAction && current.awaitingAction && current.latestPlan === plan) {
+            lifecycle?.finishReady?.();
+        }
+        ctx.ui.notify(`Plan exported to ${result.path}`, "info");
+        return true;
+    } catch (error) {
+        if ((error as Error).name !== "AbortError" && (!lifecycle || lifecycle.isCurrent())) {
+            ctx.ui.notify(
+                `Plan export failed: ${error instanceof Error ? error.message : String(error)}`,
+                "error",
+            );
+        }
         return false;
     }
-
-    if (!isCurrent()) return false;
-    const finishedReady = state.enabled && Boolean(state.latestPlan?.trim())
-        && lifecycle?.finishReady !== undefined;
-    if (finishedReady) lifecycle.finishReady?.();
-    const detail = finishedReady ? " Plan mode disabled." : "";
-    ctx.ui.notify(safeNotification(`Plan exported to ${result.path}.${detail}`), "info");
-    return true;
-}
-
-export async function exportPlanToFile(
-    plan: string,
-    requestedPath: string | undefined,
-    cwd: string,
-    signal?: AbortSignal,
-    isCurrent: () => boolean = () => true,
-    defaultPath = DEFAULT_PLAN_EXPORT_PATH,
-): Promise<PlanExportResult> {
-    const path = resolvePlanExportPath(requestedPath, cwd, defaultPath);
-    await withFileMutationQueue(path, async () => {
-        throwIfCancelled(signal, isCurrent);
-        await mkdir(dirname(path), { recursive: true });
-        throwIfCancelled(signal, isCurrent);
-        try {
-            await writeFile(path, `${plan}\n`, { encoding: "utf8", flag: "wx" });
-        } catch (error: unknown) {
-            if (isNodeError(error) && error.code === "EEXIST") {
-                throw new Error(
-                    "Plan export target already exists: "
-                        + `${path}`
-                        + ". Choose another path or remove it first.",
-                );
-            }
-            throw error;
-        }
-    });
-    return { path };
-}
-
-export function planExportDestination(defaultPath: string, cwd: string): PlanExportDestination {
-    return {
-        configuredPath: safeNotification(defaultPath),
-        resolvedPath: safeNotification(resolvePlanExportPath(undefined, cwd, defaultPath)),
-    };
-}
-
-export function resolvePlanExportPath(
-    requestedPath: string | undefined,
-    cwd: string,
-    defaultPath = DEFAULT_PLAN_EXPORT_PATH,
-) {
-    const rawPath = requestedPath?.trim() || defaultPath;
-    const normalizedPath = rawPath.startsWith("@") ? rawPath.slice(1) : rawPath;
-    if (!normalizedPath.trim()) throw new Error("Plan export path must not be empty.");
-    if (normalizedPath.includes("\0")) {
-        throw new Error("Plan export path must not contain NUL bytes.");
-    }
-    return resolve(cwd, normalizedPath);
-}
-
-function safeNotification(value: string) {
-    let sanitized = "";
-    for (const character of stripVTControlCharacters(value)) {
-        const codePoint = character.codePointAt(0);
-        sanitized +=
-            codePoint !== undefined && codePoint > 0x1f && !(codePoint >= 0x7f && codePoint <= 0x9f)
-                ? character
-                : " ";
-    }
-    return sanitized;
-}
-
-function throwIfCancelled(signal: AbortSignal | undefined, isCurrent: () => boolean) {
-    if (!signal?.aborted && isCurrent()) return;
-    throw signal?.reason instanceof Error
-        ? signal.reason
-        : new DOMException("Plan export cancelled", "AbortError");
-}
-
-function isNodeError(error: unknown): error is NodeJS.ErrnoException {
-    return error instanceof Error && "code" in error;
 }

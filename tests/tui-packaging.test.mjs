@@ -10,7 +10,7 @@ const manifest = readJson("package.json");
 const shared = readJson("tui/package.json");
 const lock = readJson("package-lock.json");
 
-test("seven workspaces retain exactly six Pi extension entrypoints and one Kit owner", () => {
+test("seven workspaces retain six Pi entrypoints and a host-only shared TUI", () => {
     assert.equal(manifest.name, "pi-extensions");
     assert.equal(lock.name, manifest.name);
     assert.equal(lock.packages[""].name, manifest.name);
@@ -23,8 +23,16 @@ test("seven workspaces retain exactly six Pi extension entrypoints and one Kit o
     assert.equal(shared.private, true);
     assert.equal(shared.pi, undefined);
     assert.equal(shared.exports["."], "./src/index.ts");
-    assert.equal(shared.dependencies["@narumitw/pi-tui-kit"], "0.59.0");
-    assert.equal(manifest.dependencies["@narumitw/pi-tui-kit"], undefined);
+    assert.deepEqual(shared.dependencies ?? {}, {});
+    assert.equal(lock.packages["node_modules/@narumitw/pi-tui-kit"], undefined);
+    for (const [path, metadata] of Object.entries(lock.packages)) {
+        for (const field of ["dependencies", "devDependencies", "peerDependencies"]) {
+            assert.ok(
+                !Object.keys(metadata[field] ?? {}).some((name) => name.startsWith("@narumitw/")),
+                `${path || "root"} ${field}: third-party Pi extension dependency`,
+            );
+        }
+    }
     assert.deepEqual(lock.packages["node_modules/@pi-extensions/tui"], {
         resolved: "tui",
         link: true,
@@ -56,14 +64,25 @@ function packedFiles(workspace) {
     return JSON.parse(result.stdout)[0].files.map((file) => file.path);
 }
 
-test("source-only shared package and root bundle pack runtime sources and declarations", () => {
+test("source-only shared package and root bundle pack the typed runtime closure", () => {
     const files = packedFiles("@pi-extensions/tui");
     assert.ok(files.includes("src/index.ts"));
     assert.ok(files.includes("src/interaction.ts"));
-    assert.ok(files.includes("src/interaction/menu.d.ts"));
-    assert.ok(files.includes("src/interaction/questionnaire.d.ts"));
+    for (
+        const name of [
+            "types",
+            "lifetime",
+            "editor",
+            "layout",
+            "menu-components",
+            "menu",
+            "questionnaire",
+        ]
+    ) {
+        assert.ok(files.includes(`src/interaction/${name}.ts`), name);
+    }
     assert.ok(files.includes("LICENSE"));
-    assert.equal(files.filter((path) => /^src\/interaction\/.*\.js$/u.test(path)).length, 10);
+    assert.ok(!files.some((path) => /\.(?:js|d\.ts)$/u.test(path)));
     const bundle = packedFiles();
     for (const path of files) assert.ok(bundle.includes(`tui/${path}`), path);
     for (const path of manifest.pi.extensions) assert.ok(bundle.includes(path.slice(2)), path);

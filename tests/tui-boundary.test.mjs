@@ -37,7 +37,7 @@ for (const workspace of manifest.workspaces.filter((name) => name !== "tui")) {
         assert.deepEqual(
             violations,
             [],
-            "Migrate host/Kit imports to @pi-extensions/tui (tests are exempt)",
+            "Import host TUI through @pi-extensions/tui; third-party Pi extensions are not used",
         );
     });
 }

@@ -3,14 +3,12 @@ import { PlanChatCard } from "./chat.ts";
 
 export const PLAN_MODE_COMPLETE_TOOL_NAME = "plan_mode_complete";
 export const PLAN_MODE_COMPLETE_VERSION = 1;
-export const PLAN_MODE_MAX_CHARS = 50_000;
-
+export const PLAN_MODE_MAX_CHARS = 50000;
 export type PlanModeCompletionDetails = {
     version: typeof PLAN_MODE_COMPLETE_VERSION;
     source: typeof PLAN_MODE_COMPLETE_TOOL_NAME;
     plan: string;
 };
-
 export const PLAN_MODE_COMPLETE_PARAMS = {
     type: "object",
     additionalProperties: false,
@@ -25,43 +23,46 @@ export const PLAN_MODE_COMPLETE_PARAMS = {
     },
 } as const;
 
-type NormalizePlanModeCompletionResult = { ok: true; plan: string } | { ok: false; error: string };
-
+type NormalizePlanModeCompletionResult =
+    | { ok: true; plan: string }
+    | { ok: false; error: string };
 export function normalizePlanModeCompletion(input: unknown): NormalizePlanModeCompletionResult {
-    if (!isRecord(input) || typeof input.plan !== "string") {
-        return { ok: false, error: "plan must be a string" };
+    if (
+        !input || typeof input !== "object" || Array.isArray(input)
+        || !("plan" in input) || typeof input.plan !== "string"
+    ) {
+        return { ok: false, error: "Provide a Markdown plan as a string." };
+    }
+    if (input.plan.length > PLAN_MODE_MAX_CHARS) {
+        return { ok: false, error: `The plan must be at most ${PLAN_MODE_MAX_CHARS} characters.` };
     }
     const plan = input.plan.trim();
-    if (!plan) return { ok: false, error: "plan must not be empty" };
-    if (plan.length > PLAN_MODE_MAX_CHARS) {
-        return {
-            ok: false,
-            error: `plan must not exceed ${PLAN_MODE_MAX_CHARS} characters`,
-        };
-    }
-    return { ok: true, plan };
+    return plan
+        ? { ok: true, plan }
+        : { ok: false, error: "The plan must not be blank." };
 }
 
-export function planFromCompletionDetails(value: unknown) {
-    if (!isRecord(value)) return undefined;
+export function planFromCompletionDetails(value: unknown): string | undefined {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const details = value as Record<string, unknown>;
     if (
-        value.version !== PLAN_MODE_COMPLETE_VERSION
-        || value.source !== PLAN_MODE_COMPLETE_TOOL_NAME
-    ) {
-        return undefined;
-    }
-    const normalized = normalizePlanModeCompletion({ plan: value.plan });
-    return normalized.ok ? normalized.plan : undefined;
+        details.version !== PLAN_MODE_COMPLETE_VERSION
+        || details.source !== PLAN_MODE_COMPLETE_TOOL_NAME
+    ) return undefined;
+    const parsed = normalizePlanModeCompletion(details);
+    return parsed.ok ? parsed.plan : undefined;
 }
 
 export function planModeCompleted(plan: string) {
+    const normalized = normalizePlanModeCompletion({ plan });
+    if (!normalized.ok) throw new Error(normalized.error);
     return {
-        content: [{ type: "text" as const, text: `**Proposed Plan**\n\n${plan}` }],
+        content: [{ type: "text" as const, text: normalized.plan }],
         details: {
             version: PLAN_MODE_COMPLETE_VERSION,
             source: PLAN_MODE_COMPLETE_TOOL_NAME,
-            plan,
-        } satisfies PlanModeCompletionDetails,
+            plan: normalized.plan,
+        },
         terminate: true,
     };
 }
@@ -70,34 +71,20 @@ type PlanModeCompletionRenderResult = {
     content: Array<{ type: string; text?: string }>;
     details?: unknown;
 };
-
-export function planModeCompletionMarkdown(result: PlanModeCompletionRenderResult) {
-    const content = result.content
-        .filter((block) => block.type === "text" && typeof block.text === "string")
-        .map((block) => block.text)
-        .join("\n")
-        .trim();
-    if (content) return content;
-    const plan = planFromCompletionDetails(result.details);
-    return plan ? `**Proposed Plan**\n\n${plan}` : "";
+export function planModeCompletionMarkdown(result: PlanModeCompletionRenderResult): string {
+    return planFromCompletionDetails(result.details)
+        ?? result.content.filter((part) => part.type === "text").map((part) => part.text ?? "")
+            .join("\n");
 }
-
 export function renderPlanModeCompletion(
     result: PlanModeCompletionRenderResult,
     options: { isPartial: boolean },
     theme: Theme,
-) {
-    const markdown = planModeCompletionMarkdown(result);
-    const completed = planFromCompletionDetails(result.details) !== undefined
-        || markdown.startsWith("**Proposed Plan**");
+): PlanChatCard {
     return new PlanChatCard(
         "Plan",
-        markdown,
+        options.isPartial ? "Preparing the completed plan…" : planModeCompletionMarkdown(result),
         theme,
-        options.isPartial ? "waiting" : completed ? "ready" : "error",
+        options.isPartial ? "waiting" : "ready",
     );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-    return typeof value === "object" && value !== null && !Array.isArray(value);
 }

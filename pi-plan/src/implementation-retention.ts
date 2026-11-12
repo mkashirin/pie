@@ -1,39 +1,41 @@
+import { PLAN_MODE_COMPLETE_TOOL_NAME } from "./completion-tool.ts";
 import {
-    findHistoryImplementationArtifact,
     injectActiveImplementationContext,
     isEmptyAssistantMessage,
-    messageContainsExactPlanModeImplementationHandoff,
     messageContainsInactivePlanModeArtifact,
-    messageContainsLegacyPlanModeContextArtifact,
     messageContainsPlanModeImplementationContextArtifact,
     messageContainsPlanModeImplementationHandoff,
+    PLAN_HISTORY_IMPLEMENTATION_PROMPT,
     stripPlanModeCompletionCallsFromMessage,
     stripProposedPlanBlocksFromMessage,
 } from "./message-transform.ts";
 import type { ImplementationPlanRetention } from "./settings.ts";
 import type { ActiveImplementationPlan, PlanModeState } from "./state.ts";
 
-export function retentionLabel(retention: ImplementationPlanRetention) {
-    return {
-        "clear-on-start": "Off - conversation history only",
-        "clear-after-first-run": "Through first implementation run",
-        keep: "Until manually cleared",
-    }[retention];
+export function retentionLabel(retention: ImplementationPlanRetention): string {
+    switch (retention) {
+        case "clear-on-start":
+            return "Clear on start";
+        case "clear-after-first-run":
+            return "Clear after first run";
+        case "keep":
+            return "Keep";
+    }
 }
-
-export function implementationRetentionPreview(retention: ImplementationPlanRetention) {
-    return {
-        "clear-on-start": "Plan reinjection: Off; use conversation history only.",
-        "clear-after-first-run": "Plan reinjection: Through the first implementation run.",
-        keep: "Plan reinjection: Until /plan exit.",
-    }[retention];
+export function implementationRetentionPreview(retention: ImplementationPlanRetention): string {
+    switch (retention) {
+        case "clear-on-start":
+            return "Supply the approved plan to the first implementation request, then clear its retained context.";
+        case "clear-after-first-run":
+            return "Retain the approved plan through the first implementation run, then clear it.";
+        case "keep":
+            return "Keep the approved plan in implementation context until explicitly cleared.";
+    }
 }
-
 export interface ImplementationContextResult {
     messages: unknown[];
     clearActiveImplementationId?: string;
 }
-
 export interface ImplementationRetentionCoordinator {
     restore(activeImplementation: ActiveImplementationPlan | undefined): void;
     transformContext(messages: unknown[], state: PlanModeState): ImplementationContextResult;
@@ -43,113 +45,67 @@ export interface ImplementationRetentionCoordinator {
     reset(): void;
 }
 
+function withoutPlanningArtifacts(messages: unknown[]): unknown[] {
+    const result: unknown[] = [];
+    for (const message of messages) {
+        if (
+            messageContainsInactivePlanModeArtifact(message)
+            || messageContainsPlanModeImplementationContextArtifact(message)
+        ) continue;
+        const value = message as Record<string, unknown> | null;
+        if (value?.role === "toolResult" && value.toolName === PLAN_MODE_COMPLETE_TOOL_NAME) {
+            continue;
+        }
+        let cleaned = stripProposedPlanBlocksFromMessage(
+            stripPlanModeCompletionCallsFromMessage(message),
+        );
+        if (messageContainsPlanModeImplementationHandoff(message)) {
+            cleaned = { ...value, content: PLAN_HISTORY_IMPLEMENTATION_PROMPT };
+        }
+        if (!isEmptyAssistantMessage(cleaned)) result.push(cleaned);
+    }
+    return result;
+}
+
 export function createImplementationRetentionCoordinator(): ImplementationRetentionCoordinator {
-    let implementationWithDeliveredContext: string | undefined;
-    let restoredImplementationAwaitingContext: string | undefined;
-
+    let currentId: string | undefined;
+    let consumed = false;
+    let settled = false;
+    const reset = () => {
+        currentId = undefined;
+        consumed = false;
+        settled = false;
+    };
+    const restore = (active: ActiveImplementationPlan | undefined) => {
+        reset();
+        currentId = active?.id;
+    };
     return {
-        restore(activeImplementation) {
-            restoredImplementationAwaitingContext =
-                activeImplementation && activeImplementation.retention !== "keep"
-                    ? activeImplementation.id
-                    : undefined;
-        },
-
+        restore,
         transformContext(messages, state) {
-            const messagesWithoutLegacyContext = messages.filter(
-                (message) => !messageContainsLegacyPlanModeContextArtifact(message),
-            );
-            if (state.enabled) {
-                return {
-                    messages: messagesWithoutLegacyContext.filter(
-                        (message) =>
-                            !messageContainsPlanModeImplementationContextArtifact(message)
-                            && !messageContainsPlanModeImplementationHandoff(message),
-                    ),
-                };
+            if (state.enabled || state.awaitingAction) return { messages };
+            const active = state.activeImplementation;
+            if (active && active.id !== currentId) restore(active);
+            const cleaned = withoutPlanningArtifacts(messages);
+            if (!active || consumed) return { messages: cleaned };
+            const transformed = injectActiveImplementationContext(cleaned, active);
+            if (active.retention === "clear-on-start") {
+                consumed = true;
+                return { messages: transformed, clearActiveImplementationId: active.id };
             }
-
-            const activeImplementation = state.activeImplementation;
-            const inactiveMessages = activeImplementation
-                ? messagesWithoutLegacyContext
-                : messagesWithoutLegacyContext.filter(
-                    (message) =>
-                        !messageContainsPlanModeImplementationContextArtifact(message)
-                        && !messageContainsPlanModeImplementationHandoff(message),
-                );
-            const historyArtifact = activeImplementation
-                ? undefined
-                : findHistoryImplementationArtifact(inactiveMessages);
-            const historyArtifactMessage = historyArtifact
-                ? inactiveMessages[historyArtifact.messageIndex]
-                : undefined;
-            const historyToolCallMessage = historyArtifact?.toolCallMessageIndex !== undefined
-                ? inactiveMessages[historyArtifact.toolCallMessageIndex]
-                : undefined;
-            const filteredMessages = inactiveMessages
-                .filter((message) =>
-                    message === historyArtifactMessage
-                    || !messageContainsInactivePlanModeArtifact(message)
-                )
-                .map((message) =>
-                    message === historyArtifactMessage && historyArtifact?.kind === "legacy"
-                        ? message
-                        : stripProposedPlanBlocksFromMessage(message)
-                )
-                .map((message) =>
-                    stripPlanModeCompletionCallsFromMessage(
-                        message,
-                        message === historyToolCallMessage
-                            ? historyArtifact?.toolCallId
-                            : undefined,
-                    )
-                )
-                .filter((message) => !isEmptyAssistantMessage(message));
-            if (!activeImplementation) return { messages: filteredMessages };
-
-            const contextualMessages = injectActiveImplementationContext(
-                filteredMessages,
-                activeImplementation,
-            );
-            // A busy /plan implement queues its handoff behind an older run. Do not arm cleanup
-            // until that exact handoff reaches context; a restored session has no older run to
-            // drain.
-            const deliveredCurrentHandoff =
-                restoredImplementationAwaitingContext === activeImplementation.id
-                || filteredMessages.some((message) =>
-                    messageContainsExactPlanModeImplementationHandoff(
-                        message,
-                        activeImplementation.plan,
-                    )
-                );
-            if (!deliveredCurrentHandoff) return { messages: contextualMessages };
-            restoredImplementationAwaitingContext = undefined;
-
-            if (activeImplementation.retention === "clear-after-first-run") {
-                implementationWithDeliveredContext = activeImplementation.id;
-            }
-            return {
-                messages: contextualMessages,
-                clearActiveImplementationId: activeImplementation.retention === "clear-on-start"
-                    ? activeImplementation.id
-                    : undefined,
-            };
+            return { messages: transformed };
         },
-
-        implementationSettled(activeImplementation) {
-            if (
-                activeImplementation?.retention !== "clear-after-first-run"
-                || implementationWithDeliveredContext !== activeImplementation.id
-            ) {
+        implementationSettled(active) {
+            // A run may settle after another implementation has restored its lifecycle.
+            // Never let that stale completion reset or consume the replacement's retention.
+            if (!active || active.id !== currentId || settled) return undefined;
+            settled = true;
+            if ((active.retention ?? "clear-after-first-run") !== "clear-after-first-run") {
                 return undefined;
             }
-            implementationWithDeliveredContext = undefined;
-            return activeImplementation.id;
+            consumed = true;
+            return active.id;
         },
-
-        reset() {
-            implementationWithDeliveredContext = undefined;
-            restoredImplementationAwaitingContext = undefined;
-        },
+        reset,
     };
 }

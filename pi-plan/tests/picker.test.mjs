@@ -5,12 +5,11 @@ import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
 const { runMenu, defineMenu } = await jiti.import("@pi-extensions/tui");
-const { runMenu: upstreamRunMenu } = await jiti.import("@narumitw/pi-tui-kit");
-const { createTuiHarness, createRpcHarness } = await jiti.import("@narumitw/pi-tui-kit/testing");
+const { createTuiHarness, createRpcHarness } = await import("../../tests/interaction-harness.mjs");
 const { createMenuScreenComponent } = await jiti.import(
-    "../../tui/src/interaction/menu-components.js",
+    "../../tui/src/interaction/menu-components.ts",
 );
-const { wrapWords } = await jiti.import("../../tui/src/interaction/word-wrap.js");
+const { wrapWords } = await jiti.import("../../tui/src/interaction/layout.ts");
 const callers = await jiti.import("../src/interactive-ui.ts");
 const identityTheme = { fg: (_color, text) => text, bold: (text) => text };
 const keybindings = { matches: () => false, getKeys: () => [] };
@@ -316,7 +315,7 @@ test("search reminders wrap and retain selected rows and description-tail indexi
 
 test(
     "choice search, stable raw IDs, rejection memory, disabled "
-        + "rows and keyboard navigation remain Kit-owned",
+        + "rows and keyboard navigation retain native behavior",
     async () => {
         const invocations = [];
         const items = Array.from(
@@ -611,7 +610,7 @@ test(
 );
 
 test(
-    "RPC adapter is byte-for-byte upstream across all picker "
+    "RPC adapter explicitly preserves dialogs across all picker "
         + "kinds, duplicate labels, raw IDs and cancellation",
     async () => {
         for (const kind of ["actions", "choice", "multiSelect", "settings"]) {
@@ -673,7 +672,14 @@ test(
                 return { result, calls };
             }
 
-            assert.deepEqual(await drive(runMenu), await drive(upstreamRunMenu));
+            assert.deepEqual(await drive(runMenu), {
+                result: { kind: "closed", reason: "back" },
+                calls: [{
+                    itemId: "raw:2",
+                    value: kind === "settings" ? "next" : undefined,
+                    selected: kind === "multiSelect" ? true : undefined,
+                }],
+            });
         }
     },
 );
@@ -736,7 +742,7 @@ test("real Plan Mode main menu uses the questionnaire arrow marker", async () =>
     assert.equal(started, true);
 });
 
-test("real Plan Mode caller retains upstream RPC labels and unsupported-mode routing", async () => {
+test("real Plan Mode caller retains RPC labels and unsupported-mode routing", async () => {
     const rpc = createRpcHarness([{
         kind: "select",
         title: "Plan mode\nReady\nPolicy",
@@ -777,32 +783,17 @@ test("real Plan Mode caller retains upstream RPC labels and unsupported-mode rou
             return { result, unsupported };
         }
 
-        assert.deepEqual(await drive(runMenu), await drive(upstreamRunMenu));
+        assert.deepEqual(await drive(runMenu), {
+            result: { kind: "unsupported", mode },
+            unsupported: [mode],
+        });
     }
 });
 
 test(
-    "focused source closure, pinned dependency and original MIT "
-        + "attribution remain explicit",
+    "shared runtime and declaration closure has no vendor dependency or generated chunks",
     () => {
         const root = new URL("../../tui/", import.meta.url);
-        const upstreamPackage = new URL(
-            "../package.json",
-            import.meta.resolve("@narumitw/pi-tui-kit"),
-        );
-        const upstream = new URL("./", upstreamPackage);
-        const lock = JSON.parse(
-            readFileSync(new URL("../../package-lock.json", import.meta.url), "utf8"),
-        );
-        assert.equal(lock.packages["node_modules/@narumitw/pi-tui-kit"].version, "0.59.0");
-        assert.equal(
-            JSON.parse(readFileSync(upstreamPackage, "utf8")).version,
-            "0.59.0",
-        );
-        assert.deepEqual(
-            readFileSync(new URL("LICENSE", root)),
-            readFileSync(new URL("LICENSE", upstream)),
-        );
         assert.equal(existsSync(new URL("vendor/", root)), false);
         assert.equal(existsSync(new URL("src/chunks/", root)), false);
         const files = [];
@@ -818,6 +809,11 @@ test(
                 files.push(file);
                 const source = readFileSync(file, "utf8");
                 assert.ok(!source.includes("@ts-nocheck"), entry.name);
+                assert.ok(!source.includes("@narumitw"), `${entry.name}: vendor reference`);
+                assert.ok(
+                    !/node_modules|\/tmp\/|pi-independent-baseline/u.test(source),
+                    entry.name,
+                );
                 for (
                     const [, , specifier] of source.matchAll(
                         /(?:from\s*|import\s*\(|require\s*\()(["'])([^"']+)\1/gu,
@@ -841,10 +837,10 @@ test(
 
         walk(new URL("src/", root));
         const ui = files.filter((file) => file.pathname.includes("/interaction/"));
-        assert.equal(ui.filter((file) => file.pathname.endsWith(".js")).length, 10);
+        assert.ok(ui.length > 0, "interaction sources are present");
         for (const file of ui) {
             assert.ok(
-                !/grok-mermaid|highlight\.js|runDialogMenu|runRpcQuestionnaire/u.test(
+                !/grok-mermaid|highlight\.js/u.test(
                     readFileSync(file, "utf8"),
                 ),
                 file.pathname,

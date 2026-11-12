@@ -76,12 +76,13 @@ All seven workspaces share one root `package-lock.json`. npm creates workspace l
 child installs or create child lockfiles. Host Pi packages are peers supplied by Pi at runtime;
 [`.npmrc`](../.npmrc) prevents installing duplicate host peers during normal setup.
 
-Runtime dependencies include Kit **0.59.0**, web parsing/address libraries, account locking, HEM's
-offline `rregex` WASM runtime, and LSP's JSON-RPC/protocol/process-launch libraries. Exact versions
-live in the [root lockfile](../package-lock.json) and package manifests rather than a second
-dependency inventory here. Copying only TypeScript sources is not a runtime installation. The
-source-only [`@pi-extensions/tui`](tui.md) workspace is private support code, not another Pi
-extension or a separately installed package.
+Runtime dependencies include web parsing/address libraries, account locking, HEM's offline `rregex`
+WASM runtime, and LSP's JSON-RPC/protocol/process-launch libraries. Shared TUI interactions use
+only Pi host APIs, not another Pi extension. Exact versions live in the
+[root lockfile](../package-lock.json) and package manifests rather than a second dependency
+inventory here. Copying only TypeScript sources is not a runtime installation. The source-only
+[`@pi-extensions/tui`](tui.md) workspace is private support code, not another Pi extension or a
+separately installed package.
 
 ## Updates and rollback
 

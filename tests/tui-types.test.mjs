@@ -7,7 +7,7 @@ import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
-test("strict consumers import the public TUI API without allowJs or signature erosion", (t) => {
+test("strict consumers use the local typed TUI API without allowJs", (t) => {
     // Stay in the workspace's resolution tree without changing any consumer configuration.
     const directory = mkdtempSync(join(root, "tui/tests/.types-"));
     t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -35,21 +35,49 @@ test("strict consumers import the public TUI API without allowJs or signature er
     writeFileSync(
         join(directory, "consumer.mts"),
         `
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
     type Component, defineMenu, runMenu, runQuestionnaire,
+    type MenuDefinition, type RunMenuResult, type RunQuestionnaireResult,
     sanitizeDisplayText, ThemedText, wrapPreservingText,
 } from "@pi-extensions/tui";
-import type {
-    defineMenu as kitDefineMenu, runMenu as kitRunMenu,
-    runQuestionnaire as kitRunQuestionnaire,
-} from "@narumitw/pi-tui-kit";
 
-type Equal<A, B> =
-    (<T>() => T extends A ? 1 : 2) extends (<T>() => T extends B ? 1 : 2) ? true : false;
-type Assert<T extends true> = T;
-export type MenuContract = Assert<Equal<typeof runMenu, typeof kitRunMenu>>;
-export type QuestionnaireContract = Assert<Equal<typeof runQuestionnaire, typeof kitRunQuestionnaire>>;
-export type DefinitionContract = Assert<Equal<typeof defineMenu, typeof kitDefineMenu>>;
+declare const ctx: ExtensionContext;
+interface State { count: number; }
+const menu: MenuDefinition<State> = defineMenu<State>({
+    start: "main",
+    screens: {
+        main: ({ state, signal }) => ({
+            kind: "actions",
+            title: String(state.count) + signal.aborted,
+            items: [{ id: "increment", label: "Increment", action: "increment" }],
+        }),
+    },
+    actions: {
+        increment: ({ state, itemId, value, selected }) => {
+            state.count += itemId === "increment" ? 1 : 0;
+            void value;
+            void selected;
+            return { kind: "close" };
+        },
+        // @ts-expect-error Unknown routing kinds must not silently become valid actions.
+        invalid: () => ({ kind: "erase" }),
+    },
+});
+export const menuResult: Promise<RunMenuResult> =
+    runMenu(ctx, menu, { getState: () => ({ count: 0 }), isCurrent: () => true });
+export const questionnaireResult: Promise<RunQuestionnaireResult> =
+    runQuestionnaire(ctx, {
+        questions: [{
+            id: "scope", header: "Scope", prompt: "Choose scope",
+            options: [{ label: "One", description: "First choice" }, { label: "Two" }],
+        }],
+        allowNotes: true,
+    });
+// @ts-expect-error State providers retain their concrete type.
+runMenu(ctx, menu, { getState: () => ({ count: "wrong" }) });
+// @ts-expect-error Questions require stable string IDs.
+runQuestionnaire(ctx, { questions: [{ id: 1, header: "Scope", prompt: "Choose", options: [] }] });
 
 export const component: Component = new ThemedText(
     () => sanitizeDisplayText("display", { multiline: true, tabs: "expand" }),

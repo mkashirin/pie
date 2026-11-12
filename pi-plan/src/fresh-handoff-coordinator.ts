@@ -2,7 +2,6 @@ export interface DeferredFreshHandoffDependencies {
     schedule(callback: () => void): unknown;
     cancel(handle: unknown): void;
 }
-
 export interface DeferredFreshHandoffCoordinator {
     schedule(
         run: (isCurrent: () => boolean) => Promise<void>,
@@ -10,49 +9,39 @@ export interface DeferredFreshHandoffCoordinator {
     ): void;
     cancel(): void;
 }
-
-const defaultDependencies: DeferredFreshHandoffDependencies = {
-    schedule: (callback) => setTimeout(callback, 0),
-    cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
-};
-
 export function createDeferredFreshHandoffCoordinator(
-    dependencies: DeferredFreshHandoffDependencies = defaultDependencies,
+    dependencies: DeferredFreshHandoffDependencies = {
+        schedule: (callback) => setTimeout(callback, 0),
+        cancel: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+    },
 ): DeferredFreshHandoffCoordinator {
     let generation = 0;
-    let pending: { generation: number; handle: unknown } | undefined;
-
+    let scheduled: { handle?: unknown; fired: boolean } | undefined;
     const cancel = () => {
-        generation += 1;
-        if (!pending) return;
-        dependencies.cancel(pending.handle);
-        pending = undefined;
+        generation++;
+        const previous = scheduled;
+        scheduled = undefined;
+        if (previous && !previous.fired) dependencies.cancel(previous.handle);
     };
-
     return {
+        cancel,
         schedule(run, onError) {
             cancel();
-            const taskGeneration = generation;
-            const handle = dependencies.schedule(() => {
-                if (pending?.generation !== taskGeneration || generation !== taskGeneration) return;
-                pending = undefined;
-
-                const isCurrent = () => generation === taskGeneration;
-
-                void Promise.resolve()
-                    .then(() => run(isCurrent))
-                    .catch((error: unknown) => {
-                        if (!isCurrent()) return;
-                        try {
-                            onError(error);
-                        } catch {
-                            // Detached error reporting must not create another unhandled rejection.
-                        }
-                    });
+            const ticket = generation;
+            const entry = { handle: undefined as unknown, fired: false };
+            scheduled = entry;
+            const isCurrent = () => ticket === generation;
+            entry.handle = dependencies.schedule(() => {
+                entry.fired = true;
+                if (scheduled === entry) scheduled = undefined;
+                void Promise.resolve().then(async () => {
+                    if (isCurrent()) await run(isCurrent);
+                }).catch((error: unknown) => {
+                    if (isCurrent()) onError(error);
+                }).catch(() => {
+                    // Error reporting is terminal and must not produce an unhandled task rejection.
+                });
             });
-            pending = { generation: taskGeneration, handle };
         },
-
-        cancel,
     };
 }

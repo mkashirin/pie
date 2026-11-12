@@ -2,87 +2,78 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 export const WORKFLOW_MUTEX_CHANNEL = "workflow:mutex:v1";
 export const AGENT_WORKFLOW_GROUP = "agent-workflow";
-
 export type WorkflowMutexOwner = symbol;
 
-interface WorkflowMutexAttemptV1 {
+interface Claim {
+    version: 1;
     session: object;
     group: string;
-    busy: boolean;
+    owner: WorkflowMutexOwner;
+    denied: boolean;
 }
 
 export class WorkflowMutex {
     private session: object | undefined;
-    private readonly heldGroups = new Map<string, WorkflowMutexOwner>();
+    private readonly heldGroups = new Map<
+        string,
+        { owner: WorkflowMutexOwner; generation: number }
+    >();
     private generation = 0;
 
     constructor(private readonly pi: Pick<ExtensionAPI, "events">) {
-        pi.events.on(WORKFLOW_MUTEX_CHANNEL, (payload) => {
-            this.answer(payload);
-        });
+        pi.events.on(WORKFLOW_MUTEX_CHANNEL, (event) => this.answer(event));
     }
 
     bindSession(session: object): void {
-        this.generation += 1;
         this.heldGroups.clear();
+        this.generation++;
         this.session = session;
     }
 
     unbindSession(session: object): void {
         if (this.session !== session) return;
-        this.generation += 1;
         this.heldGroups.clear();
+        this.generation++;
         this.session = undefined;
     }
 
     acquire(group = AGENT_WORKFLOW_GROUP): WorkflowMutexOwner | undefined {
-        const session = this.session;
-        const generation = this.generation;
-        if (!session || this.heldGroups.has(group)) return undefined;
-
-        const attempt: WorkflowMutexAttemptV1 = { session, group, busy: false };
-        try {
-            this.pi.events.emit(WORKFLOW_MUTEX_CHANNEL, attempt);
-        } catch {
-            return undefined;
-        }
-        if (
-            this.session !== session
-            || this.generation !== generation
-            || attempt.session !== session
-            || attempt.group !== group
-            || attempt.busy !== false
-            || this.heldGroups.has(group)
-        ) {
-            return undefined;
-        }
-
+        if (!this.session || !group || this.heldGroups.has(group)) return undefined;
         const owner = Symbol(group);
-        this.heldGroups.set(group, owner);
+        const generation = this.generation;
+        const claim: Claim = { version: 1, session: this.session, group, owner, denied: false };
+        // Publish locally before probing peers so a reentrant claim cannot pass unnoticed.
+        this.heldGroups.set(group, { owner, generation });
+        try {
+            this.pi.events.emit(WORKFLOW_MUTEX_CHANNEL, claim);
+        } catch (error) {
+            this.release(owner, group);
+            throw error;
+        }
+        if (claim.denied || generation !== this.generation || !this.isOwner(owner, group)) {
+            this.release(owner, group);
+            return undefined;
+        }
         return owner;
     }
 
     isOwner(owner: WorkflowMutexOwner | undefined, group = AGENT_WORKFLOW_GROUP): boolean {
-        return owner !== undefined && this.heldGroups.get(group) === owner;
+        const held = this.heldGroups.get(group);
+        return owner !== undefined && this.session !== undefined && held?.owner === owner
+            && held.generation === this.generation;
     }
 
     release(owner: WorkflowMutexOwner | undefined, group = AGENT_WORKFLOW_GROUP): void {
-        if (!this.isOwner(owner, group)) return;
-        this.heldGroups.delete(group);
+        if (this.isOwner(owner, group)) this.heldGroups.delete(group);
     }
 
-    private answer(payload: unknown): void {
-        try {
-            if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return;
-            const attempt = payload as Partial<WorkflowMutexAttemptV1>;
-            if (attempt.session !== this.session) return;
-            if (attempt.group !== AGENT_WORKFLOW_GROUP) return;
-            if (typeof attempt.busy !== "boolean") return;
-            if (!this.heldGroups.has(attempt.group)) return;
-            attempt.busy = true;
-        } catch {
-            // Protocol listeners must ignore unusual objects without interrupting sibling
-            // listeners.
-        }
+    private answer(event: unknown): void {
+        if (!event || typeof event !== "object") return;
+        const claim = event as Partial<Claim>;
+        if (
+            claim.version !== 1 || claim.session !== this.session || typeof claim.group !== "string"
+        ) return;
+        const held = this.heldGroups.get(claim.group);
+        if (held && held.owner !== claim.owner) claim.denied = true;
     }
 }

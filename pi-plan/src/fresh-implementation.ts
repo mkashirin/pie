@@ -1,21 +1,17 @@
-import { randomUUID } from "node:crypto";
-import { stripVTControlCharacters } from "node:util";
 import type { ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { randomUUID } from "node:crypto";
+import { isPendingImplementationModelIdentifier } from "./implementation-models.ts";
 import { PLAN_HISTORY_IMPLEMENTATION_PROMPT } from "./message-transform.ts";
-import { createModeContractMessage } from "./mode-contract.ts";
-import type { ImplementationPlanRetention } from "./settings.ts";
 import {
-    type ImplementationRuntimeSelection,
-    isPendingImplementationModelIdentifier,
-    MAX_PENDING_IMPLEMENTATION_MODEL_IDENTIFIER_LENGTH,
-    type PendingImplementationRuntime,
-    type PlanCompletionSource,
-    type PlanModeState,
-    restorePlanModeState,
+    IMPLEMENTATION_PLAN_RETENTIONS,
+    IMPLEMENTATION_THINKING_LEVELS,
+    type ImplementationPlanRetention,
+} from "./settings.ts";
+import type {
+    ImplementationRuntimeSelection,
+    PlanCompletionSource,
+    PlanModeState,
 } from "./state.ts";
-
-type NewSessionOptions = Exclude<Parameters<ExtensionCommandContext["newSession"]>[0], undefined>;
-type ReplacementContext = Parameters<NonNullable<NewSessionOptions["withSession"]>>[0];
 
 export interface FreshImplementationRequest {
     plan: string;
@@ -25,7 +21,6 @@ export interface FreshImplementationRequest {
     runtime?: ImplementationRuntimeSelection;
     isCurrent(): boolean;
 }
-
 interface FreshImplementationFromStateOptions {
     getState(): PlanModeState;
     menuIsCurrent(): boolean;
@@ -33,7 +28,6 @@ interface FreshImplementationFromStateOptions {
     stateEntryType: string;
     runtime?: ImplementationRuntimeSelection;
 }
-
 export type FreshImplementationResult =
     | { kind: "started" }
     | { kind: "cancelled" }
@@ -41,63 +35,46 @@ export type FreshImplementationResult =
     | { kind: "rejected" }
     | { kind: "stale" };
 
-export function formatImplementationHandoff(plan: string) {
-    return ("Plan mode is now disabled. Full tool access is restored. "
-        + "Implement this proposed plan now:\n\n"
-        + `${plan}`);
+export function formatImplementationHandoff(plan: string): string {
+    return `${PLAN_HISTORY_IMPLEMENTATION_PROMPT}\n\n${plan}`;
 }
-
-export function formatHistoryImplementationPrompt() {
+export function formatHistoryImplementationPrompt(): string {
     return PLAN_HISTORY_IMPLEMENTATION_PROMPT;
 }
-
-export function formatTransferredPlanPrompt(plan: string, fresh: boolean) {
-    const destination = fresh ? " in a fresh context" : "";
-    return ("A previous agent produced the plan below to accomplish the "
-        + "user's task. Implement the plan"
-        + `${destination}`
-        + ". Treat the plan as the source of user intent, re-read "
-        + "files as needed, and carry the work through implementation "
-        + "and verification.\n\n"
-        + `${plan}`);
+export function formatTransferredPlanPrompt(plan: string, fresh: boolean): string {
+    return fresh ? formatImplementationHandoff(plan) : formatHistoryImplementationPrompt();
 }
 
 export async function startFreshImplementationFromState(
     ctx: ExtensionContext,
     options: FreshImplementationFromStateOptions,
-) {
-    if (!isCommandContext(ctx)) {
+): Promise<FreshImplementationResult> {
+    if (!options.menuIsCurrent()) return { kind: "stale" };
+    if (
+        !("newSession" in ctx) || typeof ctx.newSession !== "function"
+        || !("waitForIdle" in ctx) || typeof ctx.waitForIdle !== "function"
+    ) {
         ctx.ui.notify(
-            "Fresh implementation requires the interactive /plan "
-                + "command. Reopen /plan and try again.",
+            "Fresh implementation requires a command-capable session context.",
             "warning",
         );
-        return { kind: "rejected" } as const;
+        return { kind: "rejected" };
     }
-    const initialState = options.getState();
-    const savedPlan = initialState.enabled ? undefined : initialState.savedPlan;
-    const plan = (initialState.enabled ? initialState.latestPlan : savedPlan?.plan)?.trim();
-    const source = initialState.enabled ? initialState.latestPlanSource : savedPlan?.source;
-    if (!plan || !source) {
-        ctx.ui.notify("No completed plan is available to implement.", "warning");
-        return { kind: "rejected" } as const;
-    }
-    const wasEnabled = initialState.enabled;
-
+    const state = options.getState();
+    const chosen = state.awaitingAction && state.latestPlan && state.latestPlanSource
+        ? { plan: state.latestPlan, source: state.latestPlanSource }
+        : state.savedPlan ?? state.activeImplementation;
+    if (!chosen) return { kind: "rejected" };
     const isCurrent = () => {
-        const current = options.getState();
-        return (
-            options.menuIsCurrent()
-            && current.enabled === wasEnabled
-            && (wasEnabled
-                ? current.latestPlan === plan && current.latestPlanSource === source
-                : current.savedPlan === savedPlan)
-        );
+        if (!options.menuIsCurrent()) return false;
+        const latest = options.getState();
+        const candidate = latest.awaitingAction
+            ? { plan: latest.latestPlan, source: latest.latestPlanSource }
+            : latest.savedPlan ?? latest.activeImplementation;
+        return candidate?.plan === chosen.plan && candidate?.source === chosen.source;
     };
-
-    return startFreshImplementationSession(ctx, {
-        plan,
-        source,
+    return startFreshImplementationSession(ctx as ExtensionCommandContext, {
+        ...chosen,
         retention: options.retention,
         stateEntryType: options.stateEntryType,
         runtime: options.runtime,
@@ -109,323 +86,92 @@ export async function startFreshImplementationSession(
     ctx: ExtensionCommandContext,
     request: FreshImplementationRequest,
 ): Promise<FreshImplementationResult> {
-    if (ctx.mode === "print" || ctx.mode === "json") {
-        throw new Error(
-            "Fresh plan implementation is unavailable in print/JSON mode. Use TUI or RPC.",
-        );
+    if (!request.isCurrent() || ctx.signal?.aborted) return { kind: "stale" };
+    if (
+        !request.plan.trim() || request.plan.length > 50000 || !request.stateEntryType.trim()
+        || !["plan_mode_complete", "legacy_proposed_plan"].includes(request.source)
+        || !(IMPLEMENTATION_PLAN_RETENTIONS as readonly string[]).includes(request.retention)
+    ) {
+        return { kind: "rejected" };
     }
-
-    await ctx.waitForIdle();
-    if (!request.isCurrent()) return { kind: "stale" };
-    if (!(await preflightModel(ctx, request))) return { kind: "rejected" };
-    if (!request.isCurrent()) return { kind: "stale" };
-
-    const usesConversationHistory = request.retention === "clear-on-start";
-    const pendingImplementationRuntime = pendingRuntimeIntent(request.runtime);
-    const activeImplementation = usesConversationHistory
-        ? undefined
-        : {
-            id: randomUUID(),
-            plan: request.plan,
-            source: request.source,
-            startedAt: Date.now(),
-            retention: request.retention,
-        };
-    const destinationState: PlanModeState | undefined =
-        activeImplementation || pendingImplementationRuntime
-            ? {
-                enabled: false,
-                awaitingAction: false,
-                ...(activeImplementation ? { activeImplementation } : {}),
-                ...(pendingImplementationRuntime ? { pendingImplementationRuntime } : {}),
-            }
-            : undefined;
-    const handoff = usesConversationHistory
-        ? formatTransferredPlanPrompt(request.plan, true)
-        : formatImplementationHandoff(request.plan);
-    const parentSession = ctx.sessionManager.getSessionFile();
-    let setupError: string | undefined;
-    let kickoffError: string | undefined;
-
-    if (ctx.mode === "rpc") safeNotify(ctx, "Starting fresh implementation session...", "info");
-
-    let result: Awaited<ReturnType<ExtensionCommandContext["newSession"]>>;
+    // Copy mutable caller data before the first await. Invalid runtime selections never create a session.
+    const runtime = request.runtime && {
+        ...(request.runtime.model ? { model: { ...request.runtime.model } } : {}),
+        ...(request.runtime.thinkingLevel ? { thinkingLevel: request.runtime.thinkingLevel } : {}),
+    };
+    if (
+        runtime?.model && (!isPendingImplementationModelIdentifier(runtime.model.provider)
+            || !isPendingImplementationModelIdentifier(runtime.model.modelId))
+    ) return { kind: "rejected" };
+    if (
+        runtime?.thinkingLevel
+        && !(IMPLEMENTATION_THINKING_LEVELS as readonly string[]).includes(runtime.thinkingLevel)
+    ) return { kind: "rejected" };
+    const plan = request.plan;
+    const source = request.source;
+    const retention = request.retention;
+    const stateEntryType = request.stateEntryType;
+    let replacementEntered = false;
+    let replacementPrepared = false;
+    let delivered = false;
+    let stale = false;
     try {
-        result = await ctx.newSession({
-            ...(parentSession ? { parentSession } : {}),
-            setup: async (sessionManager) => {
-                try {
-                    const contract = createModeContractMessage("normal");
-                    sessionManager.appendCustomMessageEntry(
-                        contract.customType,
-                        contract.content,
-                        contract.display,
-                        contract.details,
-                    );
-                    if (destinationState) {
-                        sessionManager.appendCustomEntry(request.stateEntryType, destinationState);
-                    }
-                } catch (error: unknown) {
-                    setupError = safeErrorDetail(error);
-                }
+        if (ctx.hasPendingMessages()) return { kind: "rejected" };
+        await ctx.waitForIdle();
+        if (!request.isCurrent() || ctx.signal?.aborted) return { kind: "stale" };
+        if (!ctx.isIdle() || ctx.hasPendingMessages()) return { kind: "rejected" };
+        const parentSession = ctx.sessionManager.getSessionFile();
+        const state: PlanModeState = {
+            enabled: false,
+            awaitingAction: false,
+            activeImplementation: {
+                id: `implementation:${randomUUID()}`,
+                plan,
+                source,
+                startedAt: Date.now(),
+                retention,
             },
-            withSession: async (replacementCtx) => {
-                if (setupError) {
-                    recoverSetupFailure(replacementCtx, handoff, setupError);
-                    return;
-                }
-
-                const reportKickoffFailure = (detail: string) => {
-                    kickoffError = detail;
-                    const recoveredInEditor = usesConversationHistory
-                        && safeSetEditorText(replacementCtx, handoff);
-                    safeNotify(
-                        replacementCtx,
-                        usesConversationHistory
-                            ? recoveredInEditor
-                                ? ("Fresh session created, but implementation did not start: "
-                                    + `${detail}`
-                                    + ". The implementation request is in the editor; submit it or "
-                                    + "resume the parent planning session.")
-                                : ("Fresh session created, but implementation did not start: "
-                                    + `${detail}`
-                                    + ". The implementation request could not be restored to the "
-                                    + "editor; resume the parent planning session.")
-                            : ("Fresh session created, but implementation did not start: "
-                                + `${detail}`
-                                + ". Send a message to continue, use /plan exit to clear the "
-                                + "active plan, or resume the parent planning session."),
-                        "error",
+            ...(runtime ? { pendingImplementationRuntime: { version: 1, ...runtime } } : {}),
+        };
+        const result = await ctx.newSession({
+            parentSession,
+            setup: async (manager) => {
+                if (!request.isCurrent() || ctx.signal?.aborted) {
+                    stale = true;
+                    throw new DOMException(
+                        "Fresh handoff owner is no longer current",
+                        "AbortError",
                     );
-                };
-
-                try {
-                    await replacementCtx.sendUserMessage(handoff);
-                } catch (error: unknown) {
-                    reportKickoffFailure(safeErrorDetail(error));
-                    return;
                 }
-                if (pendingImplementationRuntime) {
-                    const runtimeStatus = destinationRuntimeConsumptionStatus(
-                        replacementCtx,
-                        request.stateEntryType,
-                    );
-                    if (runtimeStatus !== "consumed") {
-                        reportKickoffFailure(
-                            runtimeStatus === "pending"
-                                ? "fresh implementation settings could not be consumed"
-                                : "fresh implementation settings could not be verified as consumed",
-                        );
-                        return;
-                    }
-                }
-                safeNotify(
-                    replacementCtx,
-                    "Fresh implementation session started. Only the approved plan was transferred.",
-                    "info",
-                );
+                manager.appendCustomEntry(stateEntryType, state);
+                replacementPrepared = true;
+            },
+            withSession: async (replacement) => {
+                replacementEntered = true;
+                // The old workflow is intentionally invalidated by session_shutdown. Never use its
+                // ownership predicate or session-bound context after this boundary.
+                if (
+                    !replacement.isIdle() || replacement.hasPendingMessages()
+                    || replacement.signal?.aborted
+                ) return;
+                await replacement.sendUserMessage(formatTransferredPlanPrompt(plan, true));
+                delivered = true;
             },
         });
-    } catch (error: unknown) {
-        safeNotify(
-            ctx,
-            `Unable to start a fresh implementation session: ${
-                safeErrorDetail(error)
-            }. The source plan remains available; retry or resume the planning session.`,
+        if (result.cancelled) return { kind: "cancelled" };
+        return { kind: delivered ? "started" : "partial" };
+    } catch (error) {
+        // Once setup has prepared replacement state, the host may have invalidated the old
+        // context even if session_start failed before withSession. Do not touch it to report errors.
+        if (replacementEntered || replacementPrepared && !stale) return { kind: "partial" };
+        if (stale || !request.isCurrent()) return { kind: "stale" };
+        if ((error as Error).name === "AbortError") return { kind: "cancelled" };
+        ctx.ui.notify(
+            `Fresh implementation failed: ${
+                error instanceof Error ? error.message : String(error)
+            }`,
             "error",
         );
         return { kind: "rejected" };
     }
-
-    if (result.cancelled) {
-        safeNotify(ctx, "Fresh implementation cancelled. The plan remains available.", "info");
-        return { kind: "cancelled" };
-    }
-    return setupError || kickoffError ? { kind: "partial" } : { kind: "started" };
-}
-
-async function preflightModel(ctx: ExtensionCommandContext, request: FreshImplementationRequest) {
-    const requestedModel = request.runtime?.model;
-    let model = ctx.model;
-    if (requestedModel) {
-        if (
-            !isPendingImplementationModelIdentifier(requestedModel.provider)
-            || !isPendingImplementationModelIdentifier(requestedModel.modelId)
-        ) {
-            notifyCurrent(
-                ctx,
-                request,
-                "Unable to implement the plan: implementation model provider "
-                    + "and ID must each contain 1-"
-                    + `${MAX_PENDING_IMPLEMENTATION_MODEL_IDENTIFIER_LENGTH}`
-                    + " characters. Choose another model and retry.",
-                "warning",
-            );
-            return false;
-        }
-        const isCurrentModel = ctx.model?.provider === requestedModel.provider
-            && ctx.model.id === requestedModel.modelId;
-        if (!isCurrentModel) {
-            try {
-                model = ctx.modelRegistry.find(requestedModel.provider, requestedModel.modelId);
-            } catch (error: unknown) {
-                notifyCurrent(
-                    ctx,
-                    request,
-                    `Unable to implement the plan: ${safeErrorDetail(error)}`,
-                    "error",
-                );
-                return false;
-            }
-        }
-        if (!model) {
-            notifyCurrent(
-                ctx,
-                request,
-                `Unable to implement the plan: implementation model ${
-                    safeModelReference(requestedModel)
-                } is no longer available. Choose another model and retry.`,
-                "warning",
-            );
-            return false;
-        }
-    }
-    if (!model) {
-        notifyCurrent(
-            ctx,
-            request,
-            "Unable to implement the plan: no model is selected.",
-            "warning",
-        );
-        return false;
-    }
-    let auth: Awaited<ReturnType<ExtensionCommandContext["modelRegistry"]["getApiKeyAndHeaders"]>>;
-    try {
-        auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-    } catch (error: unknown) {
-        notifyCurrent(
-            ctx,
-            request,
-            `Unable to implement the plan: ${safeErrorDetail(error)}`,
-            "error",
-        );
-        return false;
-    }
-    if (!request.isCurrent()) return false;
-    if (!auth.ok) {
-        notifyCurrent(
-            ctx,
-            request,
-            requestedModel
-                ? `Unable to implement the plan with ${safeModelReference(model)}: ${
-                    safeErrorDetail(auth.error)
-                }. Choose another model or configure authentication, then retry.`
-                : `Unable to implement the plan: ${safeErrorDetail(auth.error)}`,
-            "warning",
-        );
-        return false;
-    }
-    return true;
-}
-
-function notifyCurrent(
-    ctx: Pick<ExtensionContext, "ui">,
-    request: FreshImplementationRequest,
-    message: string,
-    level: "info" | "warning" | "error",
-) {
-    if (request.isCurrent()) safeNotify(ctx, message, level);
-}
-
-function pendingRuntimeIntent(
-    selection: ImplementationRuntimeSelection | undefined,
-): PendingImplementationRuntime | undefined {
-    if (!selection?.model && !selection?.thinkingLevel) return undefined;
-    return {
-        version: 1,
-        ...(selection.model
-            ? { model: { provider: selection.model.provider, modelId: selection.model.modelId } }
-            : {}),
-        ...(selection.thinkingLevel ? { thinkingLevel: selection.thinkingLevel } : {}),
-    };
-}
-
-function safeModelReference(model: { provider: string; id?: string; modelId?: string }) {
-    return safeErrorDetail(`${model.provider}/${model.modelId ?? model.id ?? "unknown"}`);
-}
-
-function destinationRuntimeConsumptionStatus(
-    ctx: ReplacementContext,
-    stateEntryType: string,
-): "consumed" | "pending" | "unavailable" {
-    try {
-        return restorePlanModeState(ctx.sessionManager.getBranch(), stateEntryType)
-                .pendingImplementationRuntime
-            ? "pending"
-            : "consumed";
-    } catch {
-        return "unavailable";
-    }
-}
-
-function recoverSetupFailure(ctx: ReplacementContext, handoff: string, setupError: string) {
-    const recoveredInEditor = safeSetEditorText(ctx, handoff);
-    safeNotify(
-        ctx,
-        recoveredInEditor
-            ? ("Fresh session created, but the active plan could not be saved: "
-                + `${setupError}`
-                + ". The implementation request is in the editor; submit it to "
-                + "continue or resume the parent planning session.")
-            : ("Fresh session created, but the active plan could not be saved: "
-                + `${setupError}`
-                + ". The implementation request could not be restored to the "
-                + "editor; resume the parent planning session."),
-        "error",
-    );
-}
-
-function safeSetEditorText(ctx: Pick<ExtensionContext, "ui">, text: string) {
-    try {
-        ctx.ui.setEditorText(text);
-        return true;
-    } catch {
-        // A replacement context can become stale while Pi reports a partial handoff.
-        return false;
-    }
-}
-
-function safeNotify(
-    ctx: Pick<ExtensionContext, "ui">,
-    message: string,
-    level: "info" | "warning" | "error",
-) {
-    try {
-        ctx.ui.notify(message, level);
-    } catch {
-        // A source or replacement context can become stale during session replacement.
-    }
-}
-
-function isCommandContext(ctx: ExtensionContext): ctx is ExtensionCommandContext {
-    return typeof (ctx as Partial<ExtensionCommandContext>).newSession === "function";
-}
-
-function safeErrorDetail(error: unknown) {
-    const detail = error instanceof Error ? error.message : String(error);
-    const normalized = [...stripVTControlCharacters(detail)]
-        .map((character) => {
-            const codePoint = character.codePointAt(0) ?? 0;
-            return codePoint <= 0x1f
-                    || (codePoint >= 0x7f && codePoint <= 0x9f)
-                    || (codePoint >= 0x202a && codePoint <= 0x202e)
-                    || (codePoint >= 0x2066 && codePoint <= 0x2069)
-                ? " "
-                : character;
-        })
-        .join("")
-        .replace(/\s+/gu, " ")
-        .trim() || "unknown error";
-    const characters = [...normalized];
-    return characters.length > 500 ? `${characters.slice(0, 497).join("")}...` : normalized;
 }

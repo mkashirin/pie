@@ -13,10 +13,11 @@ This supplements the agent-directory guidance; it records repository-specific ed
   configuration, file routing, server clients, fixes, and bounded result packets.
 - [`pi-plan/src/plan-mode.ts`](pi-plan/src/plan-mode.ts) owns lifecycle and workflow state in one
   closure. Menus, settings, session restoration, contracts, chat, and handoff helpers remain local.
-- [`tui/`](tui) (`@pi-extensions/tui`) centralizes generic host-TUI presentation and Kit 0.59.0
+- [`tui/`](tui) (`@pi-extensions/tui`) centralizes generic host-TUI presentation and local
   menu/questionnaire interactions. Read [the shared TUI guide](docs/tui.md) before editing it.
-- [`tui/src/interaction.ts`](tui/src/interaction.ts) is the typed TUI/RPC adapter boundary; generic
-  JavaScript interactions live in `tui/src/interaction/`, not Plan's domain workflow.
+- [`tui/src/interaction.ts`](tui/src/interaction.ts) exposes the typed TUI/RPC interaction
+  boundary; generic TypeScript implementations live in `tui/src/interaction/`, not Plan's domain
+  workflow.
 - [`pi-openai-subagents/index.ts`](pi-openai-subagents/index.ts) wires policy/configuration, child
   execution, reports/evidence, and fleet UI. Domain runtime/state/presentation stay local.
 - [`pi-openai-web/index.ts`](pi-openai-web/index.ts) registers native search and credential-free
@@ -55,7 +56,7 @@ or Pi's managed installation to repair this checkout.
 - Follow local dprint configs: four spaces, double quotes, parenthesized arrows, LF, 100-column
   source, 99-column Markdown; preserve import/export order. Exclude lockfiles/dependencies.
 - Strict NodeNext/noEmit is configured per package. Do not homogenize ES2022/ES2023 targets. Shared
-  interaction JavaScript is tested at runtime, not fully checked by TypeScript.
+  interactions are TypeScript and must remain consumable without `allowJs`.
 - Tests generally use `node:test`, source imports/jiti, and local fixtures; Multi also uses tsx.
   Read affected test loaders before changing imports or package boundaries.
 - Match native Pi UI chrome: arrow selectors/key hints, checkmarks, and dot separators. Keep host
@@ -81,7 +82,8 @@ or Pi's managed installation to repair this checkout.
 - Plan tools require an active effective Plan contract; visibility alone is insufficient. Keep
   workflow ownership and session/model/thinking/policy commits atomic in `plan-mode.ts`.
 - Preserve Plan's `pi-plan-mode.json`, session identifiers, tool names, RPC/no-UI fallback, raw
-  answers, cancellation, and MIT attribution when updating shared interactions.
+  answers, and cancellation. Keep Plan/shared interactions locally implemented; do not introduce
+  copied third-party Pi-extension code or dependency/type aliases to those extensions.
 - Account use is explicit. Preserve consumer model precedence, including eligible active-model
   inheritance when unconfigured. Do not rewrite saved assignments, copy credentials, or migrate
   settings automatically.
@@ -95,7 +97,7 @@ or Pi's managed installation to repair this checkout.
 - LSP: [reference](pi-lsp/docs/reference.md), especially config precedence, completeness, safe
   writes/artifacts, fixtures, loader smoke, and provider cutover.
 - Plan: [reference](pi-plan/docs/reference.md), especially workflow/settings atomicity, TUI/RPC
-  parity, numeric answers, resize/focus, provenance, and upstream update constraints.
+  parity, numeric answers, resize/focus, and source update constraints.
 - [Development](docs/development.md) maps gates, formatting, releases, and manual terminal checks.
   Offline checks do not prove clipboard, OAuth, live search/server, or terminal timing behavior.
 - [Installation](docs/installation.md) covers loading and skills. Follow

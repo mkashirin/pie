@@ -1,17 +1,8 @@
-import { PLAN_MODE_COMPLETE_TOOL_NAME } from "./completion-tool.ts";
+import { PLAN_MODE_COMPLETE_TOOL_NAME, planFromCompletionDetails } from "./completion-tool.ts";
 import type { ActiveImplementationPlan } from "./state.ts";
 
-const PLAN_CONTEXT_MESSAGE_TYPE = "plan-mode-context";
 export const PLAN_IMPLEMENTATION_CONTEXT_MESSAGE_TYPE = "plan-mode-implementation-context";
-const PROPOSED_PLAN_MESSAGE_TYPE = "proposed-plan";
-const PLAN_IMPLEMENTATION_HANDOFF_PREFIX =
-    "Plan mode is now disabled. Full tool access is restored. Implement this proposed plan now:";
 export const PLAN_HISTORY_IMPLEMENTATION_PROMPT = "Implement the plan.";
-const PROPOSED_PLAN_PATTERN =
-    /^<proposed_plan>[\t ]*\r?\n([\s\S]*?)\r?\n<\/proposed_plan>[\t ]*$/gm;
-const PROPOSED_PLAN_BLOCK_PATTERN =
-    /^<proposed_plan>[\t ]*\r?\n[\s\S]*?\r?\n<\/proposed_plan>[\t ]*$/gm;
-
 export type ProposedPlanParseResult =
     | { kind: "absent" }
     | { kind: "valid"; plan: string }
@@ -20,339 +11,197 @@ export type ProposedPlanParseResult =
     | { kind: "malformed" }
     | { kind: "unclosed" };
 
-type SessionMessage = {
-    role?: string;
-    content?: unknown;
-    stopReason?: string;
-};
-
-type TextBlock = {
-    type?: string;
-    text?: string;
-};
+const object = (value: unknown): Record<string, unknown> | undefined =>
+    value !== null && typeof value === "object" && !Array.isArray(value)
+        ? value as Record<string, unknown>
+        : undefined;
 
 export function parseProposedPlan(text: string): ProposedPlanParseResult {
-    const openingCount = text.match(/<proposed_plan>/gi)?.length ?? 0;
-    const closingCount = text.match(/<\/proposed_plan>/gi)?.length ?? 0;
-    if (openingCount === 0 && closingCount === 0) return { kind: "absent" };
-    if (openingCount > 1 || closingCount > 1) return { kind: "multiple" };
-    if (openingCount === 1 && closingCount === 0) return { kind: "unclosed" };
-    if (openingCount !== 1 || closingCount !== 1) return { kind: "malformed" };
-
-    const matches = Array.from(text.matchAll(PROPOSED_PLAN_PATTERN));
-    if (matches.length !== 1) return { kind: "malformed" };
-    const plan = matches[0]?.[1]?.trim() ?? "";
+    const opens = [...text.matchAll(/<proposed_plan>/gu)];
+    const closes = [...text.matchAll(/<\/proposed_plan>/gu)];
+    const mentions = text.match(/<\/?proposed_plan\b/gu)?.length ?? 0;
+    if (!mentions) return { kind: "absent" };
+    if (mentions !== opens.length + closes.length) return { kind: "malformed" };
+    if (opens.length > 1 || closes.length > 1) return { kind: "multiple" };
+    if (opens.length === 1 && closes.length === 0) return { kind: "unclosed" };
+    if (opens.length !== 1 || closes[0]!.index! < opens[0]!.index!) return { kind: "malformed" };
+    const plan = text.slice(opens[0]!.index! + "<proposed_plan>".length, closes[0]!.index).trim();
     return plan ? { kind: "valid", plan } : { kind: "empty" };
 }
-
-export function invalidPlanMessage(kind: "empty" | "multiple" | "malformed" | "unclosed") {
-    const detail = {
-        empty: "the block is empty",
-        multiple: "more than one plan block was produced",
-        malformed: "the tags must be on their own lines",
-        unclosed: "the closing tag is missing",
-    }[kind];
-    return ("Proposed plan is not ready: "
-        + `${detail}`
-        + ". Continue Plan mode and produce one complete non-empty "
-        + "<proposed_plan> block.");
+export function invalidPlanMessage(kind: "empty" | "multiple" | "malformed" | "unclosed"): string {
+    return `The proposed plan is ${kind}. Use plan_mode_complete alone with one complete, nonblank Markdown plan.`;
 }
-
-export function latestAssistantText(messages: unknown) {
-    if (!Array.isArray(messages)) return "";
-    for (const entry of [...messages].reverse()) {
-        const message = (entry as { message?: SessionMessage })?.message
-            ?? (entry as SessionMessage);
-        if (message?.role !== "assistant") continue;
-        const text = messageText(message);
-        if (text) return text;
-    }
-    return "";
+export function messageTextContent(message: unknown): string {
+    const content = object(message)?.content;
+    if (typeof content === "string") return content;
+    if (!Array.isArray(content)) return "";
+    return content.filter((part) => object(part)?.type === "text")
+        .map((part) => typeof part.text === "string" ? part.text : "").join("\n");
 }
-
-export function latestAssistantStopReason(messages: unknown) {
+function latestAssistant(messages: unknown): Record<string, unknown> | undefined {
     if (!Array.isArray(messages)) return undefined;
-    for (const entry of [...messages].reverse()) {
-        const message = (entry as { message?: SessionMessage })?.message
-            ?? (entry as SessionMessage);
-        if (message?.role === "assistant") return message.stopReason;
+    for (let index = messages.length - 1; index >= 0; index--) {
+        const message = object(messages[index]);
+        if (message?.role === "assistant") return message;
     }
     return undefined;
 }
-
-export function messageTextContent(message: unknown) {
-    return messageText(
-        (message as { message?: SessionMessage })?.message ?? (message as SessionMessage),
-    );
+export function latestAssistantText(messages: unknown): string {
+    return messageTextContent(latestAssistant(messages));
 }
-
-export function messageContainsLegacyPlanModeContextArtifact(message: unknown) {
-    return unwrapSessionMessage(message).customType === PLAN_CONTEXT_MESSAGE_TYPE;
+export function latestAssistantStopReason(messages: unknown): string | undefined {
+    const reason = latestAssistant(messages)?.stopReason;
+    return typeof reason === "string" ? reason : undefined;
 }
-
-export function messageContainsPlanModeImplementationContextArtifact(message: unknown) {
-    return unwrapSessionMessage(message).customType === PLAN_IMPLEMENTATION_CONTEXT_MESSAGE_TYPE;
+export function messageContainsLegacyPlanModeContextArtifact(message: unknown): boolean {
+    const value = object(message);
+    return value?.role === "custom"
+        && ["plan-mode-context", "plan-mode-prompt"].includes(String(value.customType));
 }
-
+export function messageContainsPlanModeImplementationContextArtifact(message: unknown): boolean {
+    const value = object(message);
+    return value?.role === "custom"
+        && value.customType === PLAN_IMPLEMENTATION_CONTEXT_MESSAGE_TYPE;
+}
 export function injectActiveImplementationContext(
     messages: unknown[],
     activeImplementation: ActiveImplementationPlan,
-) {
-    let foundCurrentContext = false;
-    let foundCurrentHandoff = false;
-    const expectedContext = activeImplementationContextContent(activeImplementation);
-    const messagesWithoutStaleContext = messages.filter((message) => {
-        if (messageContainsPlanModeImplementationContextArtifact(message)) {
-            const candidate = unwrapSessionMessage(message);
-            if (!foundCurrentContext && candidate.content === expectedContext) {
-                foundCurrentContext = true;
-                return true;
-            }
-            return false;
-        }
-        if (!messageContainsPlanModeImplementationHandoff(message)) return true;
-        if (
-            !foundCurrentHandoff
-            && messageContainsExactPlanModeImplementationHandoff(message, activeImplementation.plan)
-        ) {
-            foundCurrentHandoff = true;
-            return true;
-        }
-        return false;
-    });
-    if (foundCurrentHandoff || foundCurrentContext) return messagesWithoutStaleContext;
-
-    let insertionIndex = 0;
-    while (isSummaryMessage(messagesWithoutStaleContext[insertionIndex])) insertionIndex += 1;
-    const contextMessage = {
-        role: "custom" as const,
+): unknown[] {
+    const retained = messages.filter((message) =>
+        !messageContainsPlanModeImplementationContextArtifact(message)
+    );
+    const context = {
+        role: "custom",
         customType: PLAN_IMPLEMENTATION_CONTEXT_MESSAGE_TYPE,
-        content: expectedContext,
+        content: `Approved implementation plan:\n\n${activeImplementation.plan}`,
         display: false,
+        details: { version: 1, implementationId: activeImplementation.id },
         timestamp: activeImplementation.startedAt,
     };
-    return [
-        ...messagesWithoutStaleContext.slice(0, insertionIndex),
-        contextMessage,
-        ...messagesWithoutStaleContext.slice(insertionIndex),
-    ];
+    let index = 0;
+    while (
+        ["system", "compactionSummary", "branchSummary"].includes(
+            String(object(retained[index])?.role),
+        )
+    ) index++;
+    return [...retained.slice(0, index), context, ...retained.slice(index)];
 }
-
-function activeImplementationContextContent(activeImplementation: ActiveImplementationPlan) {
-    return ("[ACTIVE IMPLEMENTATION PLAN]\n\nThe user approved the exact "
-        + "implementation plan below. Continue following it until the "
-        + "user explicitly clears or supersedes it. The exact plan is "
-        + "the remainder of this message:\n\n"
-        + `${activeImplementation.plan}`);
+export function messageContainsInactivePlanModeArtifact(message: unknown): boolean {
+    const value = object(message);
+    return messageContainsLegacyPlanModeContextArtifact(message)
+        || value?.role === "custom"
+            && ["plan-mode-plan", "plan-mode-ready", "plan-mode-finalize"].includes(
+                String(value.customType),
+            );
 }
-
-export function messageContainsInactivePlanModeArtifact(message: unknown) {
-    const candidate = unwrapSessionMessage(message);
-    return (
-        candidate.customType === PROPOSED_PLAN_MESSAGE_TYPE
-        || (candidate.role === "toolResult" && candidate.toolName === PLAN_MODE_COMPLETE_TOOL_NAME)
-    );
-}
-
 interface HistoryImplementationArtifact {
     messageIndex: number;
     kind: "completion" | "legacy" | "presentation";
     toolCallId?: string;
     toolCallMessageIndex?: number;
 }
-
-// The kickoff text is intentionally generic, so only trust a plan artifact in the same
-// uninterrupted user/summary segment and require a complete tool-call/result pair.
 export function findHistoryImplementationArtifact(
     messages: unknown[],
 ): HistoryImplementationArtifact | undefined {
-    for (let index = messages.length - 1; index >= 0; index -= 1) {
-        const candidate = unwrapSessionMessage(messages[index]);
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex--) {
+        const message = object(messages[messageIndex]);
+        if (!message) continue;
         if (
-            candidate.role !== "user"
-            || contentText(candidate.content).trim() !== PLAN_HISTORY_IMPLEMENTATION_PROMPT
+            message.role === "toolResult" && message.toolName === PLAN_MODE_COMPLETE_TOOL_NAME
+            && !message.isError && planFromCompletionDetails(message.details)
         ) {
-            continue;
-        }
-        const artifact = findHistoryImplementationArtifactBeforeKickoff(messages, index);
-        if (artifact) return artifact;
-    }
-    return undefined;
-}
-
-function findHistoryImplementationArtifactBeforeKickoff(
-    messages: unknown[],
-    kickoffIndex: number,
-): HistoryImplementationArtifact | undefined {
-    for (let index = kickoffIndex - 1; index >= 0; index -= 1) {
-        const candidate = unwrapSessionMessage(messages[index]);
-        if (candidate.role === "user" || isSummaryMessage(messages[index])) return undefined;
-        if (
-            candidate.role === "toolResult" && candidate.toolName === PLAN_MODE_COMPLETE_TOOL_NAME
-        ) {
-            const toolCallId = candidate.toolCallId;
-            const toolCallMessageIndex = toolCallId
-                ? findPlanModeCompletionCallMessageIndex(messages, index, toolCallId)
+            const toolCallId = typeof message.toolCallId === "string"
+                ? message.toolCallId
                 : undefined;
-            if (toolCallId && toolCallMessageIndex !== undefined) {
-                return {
-                    messageIndex: index,
-                    kind: "completion",
-                    toolCallId,
-                    toolCallMessageIndex,
-                };
+            let toolCallMessageIndex: number | undefined;
+            if (toolCallId) {
+                for (let index = messageIndex - 1; index >= 0; index--) {
+                    const previous = object(messages[index]);
+                    if (
+                        previous?.role === "assistant" && Array.isArray(previous.content)
+                        && previous.content.some((part) => {
+                            const call = object(part);
+                            return call?.type === "toolCall"
+                                && call.name === PLAN_MODE_COMPLETE_TOOL_NAME
+                                && call.id === toolCallId;
+                        })
+                    ) {
+                        toolCallMessageIndex = index;
+                        break;
+                    }
+                }
             }
-            continue;
-        }
-        if (candidate.customType === PROPOSED_PLAN_MESSAGE_TYPE) {
-            return { messageIndex: index, kind: "presentation" };
+            return { messageIndex, kind: "completion", toolCallId, toolCallMessageIndex };
         }
         if (
-            candidate.role === "assistant"
-            && contentText(candidate.content).match(PROPOSED_PLAN_BLOCK_PATTERN)
+            message.role === "assistant"
+            && parseProposedPlan(messageTextContent(message)).kind === "valid"
         ) {
-            return { messageIndex: index, kind: "legacy" };
+            return { messageIndex, kind: "legacy" };
+        }
+        if (
+            message.role === "custom"
+            && ["plan-mode-plan", "plan-mode-ready"].includes(String(message.customType))
+        ) {
+            return { messageIndex, kind: "presentation" };
         }
     }
     return undefined;
 }
-
-function findPlanModeCompletionCallMessageIndex(
-    messages: unknown[],
-    endIndex: number,
-    toolCallId: string,
-) {
-    for (let index = endIndex - 1; index >= 0; index -= 1) {
-        const candidate = unwrapSessionMessage(messages[index]);
-        if (candidate.role === "user" || isSummaryMessage(messages[index])) return undefined;
-        if (!Array.isArray(candidate.content)) continue;
-        if (
-            candidate.content.some((block) => {
-                const toolCall = block as { type?: string; id?: string; name?: string };
-                return (
-                    toolCall.type === "toolCall" && toolCall.id === toolCallId
-                    && toolCall.name === PLAN_MODE_COMPLETE_TOOL_NAME
-                );
-            })
-        ) {
-            return index;
-        }
-    }
-    return undefined;
+export function messageContainsPlanModeImplementationHandoff(message: unknown): boolean {
+    const value = object(message);
+    if (value?.role !== "user") return false;
+    const text = messageTextContent(message).trim();
+    return text === PLAN_HISTORY_IMPLEMENTATION_PROMPT
+        || text.startsWith(`${PLAN_HISTORY_IMPLEMENTATION_PROMPT}\n\n`);
 }
-
-export function messageContainsPlanModeImplementationHandoff(message: unknown) {
-    const candidate = unwrapSessionMessage(message);
-    return (
-        candidate.role === "user"
-        && contentText(candidate.content).trimStart().startsWith(PLAN_IMPLEMENTATION_HANDOFF_PREFIX)
-    );
+export function messageContainsExactPlanModeImplementationHandoff(
+    message: unknown,
+    plan: string,
+): boolean {
+    return object(message)?.role === "user"
+        && messageTextContent(message).trim()
+            === `${PLAN_HISTORY_IMPLEMENTATION_PROMPT}\n\n${plan}`.trim();
 }
-
-export function messageContainsExactPlanModeImplementationHandoff(message: unknown, plan: string) {
-    const candidate = unwrapSessionMessage(message);
-    if (candidate.role !== "user") return false;
-    return contentText(candidate.content).trim()
-        === `${PLAN_IMPLEMENTATION_HANDOFF_PREFIX}\n\n${plan}`.trim();
+export function stripProposedPlanBlocks(text: string): string {
+    return text.replace(/<proposed_plan>[\s\S]*?<\/proposed_plan>/gu, "")
+        .replace(/<proposed_plan>[\s\S]*$/u, "").trim();
 }
-
-function isSummaryMessage(message: unknown) {
-    const role = unwrapSessionMessage(message)?.role;
-    return role === "compactionSummary" || role === "branchSummary";
-}
-
 export function stripProposedPlanBlocksFromMessage<T>(message: T): T {
-    return replaceAssistantContent(message, stripProposedPlanBlocksFromContent);
+    const value = object(message);
+    if (!value || value.role !== "assistant") return message;
+    if (typeof value.content === "string") {
+        const content = stripProposedPlanBlocks(value.content);
+        return content === value.content ? message : { ...message, content };
+    }
+    if (!Array.isArray(value.content)) return message;
+    const content = value.content.map((part: unknown) => {
+        const block = object(part);
+        return block?.type === "text" && typeof block.text === "string"
+            ? { ...block, text: stripProposedPlanBlocks(block.text) }
+            : part;
+    }).filter((part: unknown) => object(part)?.type !== "text" || object(part)?.text !== "");
+    return { ...message, content };
 }
-
 export function stripPlanModeCompletionCallsFromMessage<T>(
     message: T,
     preservedToolCallId?: string,
 ): T {
-    return replaceAssistantContent(message, (content) => {
-        if (!Array.isArray(content)) return content;
-        const nextContent = content.filter((block) => {
-            const candidate = block as { type?: string; id?: string; name?: string };
-            return !(
-                candidate.type === "toolCall"
-                && candidate.name === PLAN_MODE_COMPLETE_TOOL_NAME
-                && (!preservedToolCallId || candidate.id !== preservedToolCallId)
-            );
-        });
-        return nextContent.length === content.length ? content : nextContent;
+    const value = object(message);
+    if (value?.role !== "assistant" || !Array.isArray(value.content)) return message;
+    const content = value.content.filter((part) => {
+        const call = object(part);
+        return call?.type !== "toolCall" || call.name !== PLAN_MODE_COMPLETE_TOOL_NAME
+            || preservedToolCallId !== undefined && call.id === preservedToolCallId;
     });
+    return content.length === value.content.length ? message : { ...message, content };
 }
-
-export function isEmptyAssistantMessage(message: unknown) {
-    const candidate = unwrapSessionMessage(message);
-    return candidate.role === "assistant" && Array.isArray(candidate.content)
-        && candidate.content.length === 0;
-}
-
-function replaceAssistantContent<T>(message: T, transform: (content: unknown) => unknown): T {
-    const candidate = unwrapSessionMessage(message);
-    if (candidate.role !== "assistant") return message;
-
-    const content = transform(candidate.content);
-    if (content === candidate.content) return message;
-
-    if (isSessionMessageEntry(message)) {
-        return { ...message, message: { ...candidate, content } };
-    }
-    return { ...candidate, content } as T;
-}
-
-function unwrapSessionMessage(message: unknown) {
-    const entry = message as { message?: unknown } | null | undefined;
-    return (entry?.message ?? message ?? {}) as {
-        role?: string;
-        customType?: string;
-        toolName?: string;
-        toolCallId?: string;
-        content?: unknown;
-    };
-}
-
-function isSessionMessageEntry<T>(message: T): message is T & { message: SessionMessage } {
-    return typeof message === "object" && message !== null && "message" in message;
-}
-
-function stripProposedPlanBlocksFromContent(content: unknown) {
-    if (typeof content === "string") return stripProposedPlanBlocks(content);
-    if (!Array.isArray(content)) return content;
-
-    let changed = false;
-    const nextContent = content.map((block) => {
-        const textBlock = block as TextBlock;
-        if (textBlock.type !== "text" || typeof textBlock.text !== "string") return block;
-
-        const text = stripProposedPlanBlocks(textBlock.text);
-        if (text === textBlock.text) return block;
-
-        changed = true;
-        return { ...textBlock, text };
+export function isEmptyAssistantMessage(message: unknown): boolean {
+    const value = object(message);
+    if (value?.role !== "assistant") return false;
+    if (typeof value.content === "string") return !value.content.trim();
+    return Array.isArray(value.content) && value.content.every((part) => {
+        const block = object(part);
+        return block?.type === "text" && typeof block.text === "string" && !block.text.trim();
     });
-    return changed ? nextContent : content;
-}
-
-export function stripProposedPlanBlocks(text: string) {
-    return text.replace(PROPOSED_PLAN_BLOCK_PATTERN, "");
-}
-
-function messageText(message: SessionMessage) {
-    return contentText(message.content);
-}
-
-function contentText(content: unknown): string {
-    if (typeof content === "string") return content;
-    if (!Array.isArray(content)) return "";
-    return content
-        .map((block) => {
-            const textBlock = block as TextBlock;
-            return textBlock.type === "text" && typeof textBlock.text === "string"
-                ? textBlock.text
-                : "";
-        })
-        .filter(Boolean)
-        .join("\n");
 }

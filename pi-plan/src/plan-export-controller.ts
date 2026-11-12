@@ -16,22 +16,14 @@ export function createPlanExportController(options: PlanExportControllerOptions)
             ctx: ExtensionContext,
             signal: AbortSignal,
             isCurrent: () => boolean,
-        ) {
-            const state = options.getState();
-            return exportStoredPlan(
-                state,
-                path,
-                ctx,
-                {
-                    signal,
-                    isCurrent,
-                    getState: options.getState,
-                    finishReady: () => options.finishReady(ctx),
-                },
-                configuredPlanExportPath(options.getSettings()),
-            );
+        ): Promise<boolean> {
+            return exportStoredPlan(options.getState(), path, ctx, {
+                signal,
+                isCurrent,
+                getState: options.getState,
+                finishReady: () => options.finishReady(ctx),
+            }, configuredPlanExportPath(options.getSettings()));
         },
-
         getDestination(ctx: ExtensionContext) {
             return planExportDestination(configuredPlanExportPath(options.getSettings()), ctx.cwd);
         },
