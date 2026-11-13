@@ -8,7 +8,7 @@ import {
     getAgentDir,
     type ToolInfo,
 } from "@earendil-works/pi-coding-agent";
-import { sanitizeDisplayText, ThemedText } from "@pi-extensions/tui";
+import { sanitizeDisplayText, ThemedText } from "@pi-extensions/pi-kit";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { randomUUID } from "node:crypto";
 import { safeCallback } from "./src/callbacks.ts";

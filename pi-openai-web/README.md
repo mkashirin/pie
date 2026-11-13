@@ -83,5 +83,5 @@ subject to the output limits above.
 contracts, configuration, cancellation/security boundaries, terminal rendering, execution paths,
 troubleshooting and offline/manual checks.
 
-See [workspace development](../docs/development.md) and the [shared TUI guide](../docs/tui.md).
+See [workspace development](../docs/development.md) and the [pi-kit guide](../docs/pi-kit.md).
 Retrieval, evidence semantics and domain presenters remain local to this extension.

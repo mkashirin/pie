@@ -15,8 +15,8 @@ function sources(directory) {
     });
 }
 
-for (const workspace of manifest.workspaces.filter((name) => name !== "tui")) {
-    test(`${workspace} imports shared TUI through its public entrypoint`, () => {
+for (const workspace of manifest.workspaces.filter((name) => name !== "pi-kit")) {
+    test(`${workspace} imports pi-kit through its public entrypoint`, () => {
         const violations = [];
         for (const path of sources(join(root, workspace))) {
             const source = readFileSync(path, "utf8");
@@ -27,8 +27,8 @@ for (const workspace of manifest.workspaces.filter((name) => name !== "tui")) {
             ) {
                 if (
                     /^(?:@earendil-works\/pi-tui|@narumitw\/pi-tui-kit)(?:\/|$)/u.test(specifier)
-                    || specifier.startsWith("@pi-extensions/tui/")
-                    || /^(?:\.\.\/)+tui\//u.test(specifier)
+                    || specifier.startsWith("@pi-extensions/pi-kit/")
+                    || /^(?:\.\.\/)+pi-kit\//u.test(specifier)
                 ) {
                     violations.push(`${path.slice(root.length)}: ${specifier}`);
                 }
@@ -37,7 +37,7 @@ for (const workspace of manifest.workspaces.filter((name) => name !== "tui")) {
         assert.deepEqual(
             violations,
             [],
-            "Import host TUI through @pi-extensions/tui; third-party Pi extensions are not used",
+            "Import host TUI through @pi-extensions/pi-kit; third-party Pi extensions are not used",
         );
     });
 }

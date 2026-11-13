@@ -1,5 +1,5 @@
 import { getAgentDir, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
-import type { KeyId } from "@pi-extensions/tui";
+import type { KeyId } from "@pi-extensions/pi-kit";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";

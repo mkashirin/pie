@@ -24,7 +24,7 @@ schedules bounded work and tracks results. It is not a workflow engine or filesy
   are retained in `pi-openai-subagents-*-v1` session entries.
 - [ui.ts](../src/ui.ts), [presentation.ts](../src/presentation.ts) and
   [activity.ts](../src/activity.ts) own fleet state, agent cards and activity previews. Generic UI
-  infrastructure belongs to the [shared TUI framework](../../docs/tui.md); domain presentation and
+  infrastructure belongs to the [pi-kit framework](../../docs/pi-kit.md); domain presentation and
   runtime behavior remain here. Non-TUI execution creates no fleet widget or UI heartbeat.
 
 A child can execute multiple tool calls concurrently only when **every inherited tool** is

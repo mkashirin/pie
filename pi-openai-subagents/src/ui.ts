@@ -1,5 +1,5 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { clipText, type Component } from "@pi-extensions/tui";
+import { clipText, type Component } from "@pi-extensions/pi-kit";
 import { compactText, freezePreview } from "./activity.ts";
 import { safeCallback, warnCallbackFailure } from "./callbacks.ts";
 import { compactRunLines, MAX_VISIBLE_RUNS } from "./presentation.ts";

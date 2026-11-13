@@ -12,7 +12,7 @@ import {
     type TuiMouseEvent,
     type TuiMouseEventResult,
     visibleWidth,
-} from "@pi-extensions/tui";
+} from "@pi-extensions/pi-kit";
 import { graphemes, HelixBuffer } from "./model.ts";
 import { CommandController } from "./commands.ts";
 import { InputDecoder } from "./input.ts";

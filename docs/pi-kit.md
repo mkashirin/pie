@@ -1,7 +1,7 @@
-# Shared TUI
+# pi-kit
 
-`@pi-extensions/tui` is the private, source-only `0.1.0` workspace at [`tui/`](../tui). It is not a
-Pi extension and does not create a renderer. The root bundle still registers exactly six
+`@pi-extensions/pi-kit` is the private, source-only `0.1.0` workspace at [`pi-kit/`](../pi-kit). It
+is not a Pi extension and does not create a renderer. The root bundle still registers exactly six
 extensions; all six depend on this workspace. Pi supplies the host packages as peers; this
 workspace has no runtime library dependencies. Install from the bundle root with the shared
 lockfile, not inside a child. Independent consumer tarballs require the private workspace too; they
@@ -10,7 +10,7 @@ are not standalone registry installs. Root bundle packing includes its sources a
 ## Ownership and integration
 
 Use native `ctx.ui` dialogs/status/widgets when sufficient. Import host TUI components and local
-interaction contracts through `@pi-extensions/tui`; do not import its private `src/` paths from
+interaction contracts through `@pi-extensions/pi-kit`; do not import its private `src/` paths from
 consumer runtime code. The package owns generic display mechanics and menu/questionnaire rendering
 only. Extension registration, tool/evidence payloads, HEM's editor-offset mapping,
 OAuth/credentials, fleet leases/heartbeats, Plan workflow state, persistence, and cancellation
@@ -24,7 +24,7 @@ listeners/timers and reject stale session commits locally.
 
 ## Public API
 
-The sole export is [`tui/src/index.ts`](../tui/src/index.ts):
+The sole export is [`pi-kit/src/index.ts`](../pi-kit/src/index.ts):
 
 - All host `@earendil-works/pi-tui` values/types are re-exported unchanged, including `Component`,
   `Text`, `Markdown`, `Box`, `Input`, `SelectList`, key parsing, and width helpers.
@@ -33,8 +33,9 @@ The sole export is [`tui/src/index.ts`](../tui/src/index.ts):
   actions, detail, choice, settings, input, and multi-select screens. Screen IDs and routing remain
   separate from sanitized display labels. `runQuestionnaire(ctx, { questions, allowNotes?, title?,
   ...owner })` supports choices, custom answers, notes, and review. Public types live in
-  [`interaction/types.ts`](../tui/src/interaction/types.ts); implementations are strict TypeScript
-  under `tui/src/interaction/`, with no third-party Pi-extension imports or type aliases.
+  [`interaction/types.ts`](../pi-kit/src/interaction/types.ts); implementations are strict
+  TypeScript under `pi-kit/src/interaction/`, with no third-party Pi-extension imports or type
+  aliases.
 - TUI interactions use native `ui.custom()` and host input components; RPC uses `ui.select`,
   `ui.input`, and `ui.editor`. Menus return `closed`, `stale`, or `unsupported`; questionnaires can
   also return `submitted` with raw answers. Abort/ownership changes prevent late routing, commits,
@@ -111,7 +112,7 @@ keep the host's `...` overflow markers and `[x]`/`[ ]` checkboxes rather than in
 replacements.
 
 ```ts
-import { inlineText, ThemedText, wrapPreservingText } from "@pi-extensions/tui";
+import { inlineText, ThemedText, wrapPreservingText } from "@pi-extensions/pi-kit";
 
 // Inside a renderer callback: no inner padding; the host tool shell owns it.
 const component = new ThemedText(() => theme.fg("muted", inlineText(result.label)));
@@ -122,10 +123,10 @@ const evidence = new ThemedText(() => trustedEvidence, { wrap: wrapPreservingTex
 ## Verification and manual smoke
 
 From the bundle root: `npm run typecheck`, `npm run check --workspaces`, and `npm test`. All six
-consumers use the shared import boundary; `tests/tui-boundary.test.mjs` enforces it. Tests can
+consumers use the shared import boundary; `tests/pi-kit-boundary.test.mjs` enforces it. Tests can
 inspect private shared components and use the local `tests/interaction-harness.mjs` host driver.
-`tests/tui-types.test.mjs` compiles a strict consumer with `allowJs: false` through the public
-entrypoint, including invalid state/action contracts. `tests/tui-packaging.test.mjs` checks the
+`tests/pi-kit-types.test.mjs` compiles a strict consumer with `allowJs: false` through the public
+entrypoint, including invalid state/action contracts. `tests/pi-kit-packaging.test.mjs` checks the
 host-only dependency graph and packed TypeScript runtime closure. Root and shared pack checks are
 offline dry runs with scripts disabled; they do not prove a clean runtime-only install. All child
 formatter configs cover their docs; root formatting covers root `AGENTS.md` and `docs/**/*.md`.

@@ -1,7 +1,7 @@
 # Plan workflow and execution reference
 
 [Commands and quick start](../README.md) · [Bundle development](../../docs/development.md) ·
-[Shared TUI guide](../../docs/tui.md)
+[pi-kit guide](../../docs/pi-kit.md)
 
 ## Workflow ownership and tools
 
@@ -76,15 +76,15 @@ input and stale-session protections rather than treating handoff as a simple pro
 The root [`index.ts`](../index.ts) is the Pi discovery shim; [`src/index.ts`](../src/index.ts)
 preserves the factory and existing renderer exports. There is no build or compiled chunk tree.
 
-The shared [`tui/src/interaction.ts`](../../tui/src/interaction.ts) entrypoint owns local typed
-menus and questionnaires. TUI uses Pi's custom-component/input APIs; RPC uses native select/input/
-editor dialogs. No-UI/unsupported modes return explicit outcomes without constructing terminal
-components. Plan-specific menu definitions remain under `src/*-menu.ts`; generic TypeScript
-implementations live under [`tui/src/interaction/`](../../tui/src/interaction/). The private
-source-only `@pi-extensions/tui` workspace is shared support code, not a seventh Pi extension. See
-[the TUI guide](../../docs/tui.md) for its public surface. Keep interaction ownership, abort
-handling, navigation, hints, and sanitization there rather than duplicating private adapters inside
-Plan.
+The shared [`pi-kit/src/interaction.ts`](../../pi-kit/src/interaction.ts) entrypoint owns local
+typed menus and questionnaires. TUI uses Pi's custom-component/input APIs; RPC uses native select,
+input and editor dialogs. No-UI/unsupported modes return explicit outcomes without constructing
+terminal components. Plan-specific menu definitions remain under `src/*-menu.ts`; generic
+TypeScript implementations live under [`pi-kit/src/interaction/`](../../pi-kit/src/interaction/).
+The private source-only `@pi-extensions/pi-kit` workspace is shared support code, not a seventh Pi
+extension. See [the pi-kit guide](../../docs/pi-kit.md) for its public surface. Keep interaction
+ownership, abort handling, navigation, hints, and sanitization there rather than duplicating
+private adapters inside Plan.
 
 Presentation contracts to retain:
 
@@ -108,7 +108,7 @@ Presentation contracts to retain:
 ## Verification
 
 After `./install.sh --dev` at the bundle root, run root `npm run check` for the full bundle or `npm
-run check --workspace pi-plan` for Plan. Shared interaction changes also need the shared TUI and
+run check --workspace pi-plan` for Plan. Shared interaction changes also need the pi-kit gate and
 affected consumer gates. No child install or managed Pi patch is required.
 
 The package gate checks formatting, strict TypeScript for the core/interactions, and regression

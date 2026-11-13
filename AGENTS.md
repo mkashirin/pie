@@ -6,17 +6,17 @@ This supplements the agent-directory guidance; it records repository-specific ed
 
 - This is a source-only ESM npm workspace bundle. Pi loads TypeScript directly; there is no build.
 - Root [`package.json`](package.json) declares six `pi.extensions` entrypoints and `pi.skills`.
-  Keep discovery separate from workspace membership: `tui/` is support code, not an extension.
+  Keep discovery separate from workspace membership: `pi-kit/` is support code, not an extension.
 - [`pi-hem/index.ts`](pi-hem/index.ts) exports the editor/core; `src/index.ts` installs only the
   TUI prompt editor. Buffer/commands/input/layout/clipboard live in separate `src/` modules.
 - [`pi-lsp/index.ts`](pi-lsp/index.ts) registers tools/status. `src/runtime.ts` coordinates
   configuration, file routing, server clients, fixes, and bounded result packets.
 - [`pi-plan/src/plan-mode.ts`](pi-plan/src/plan-mode.ts) owns lifecycle and workflow state in one
   closure. Menus, settings, session restoration, contracts, chat, and handoff helpers remain local.
-- [`tui/`](tui) (`@pi-extensions/tui`) centralizes generic host-TUI presentation and local
-  menu/questionnaire interactions. Read [the shared TUI guide](docs/tui.md) before editing it.
-- [`tui/src/interaction.ts`](tui/src/interaction.ts) exposes the typed TUI/RPC interaction
-  boundary; generic TypeScript implementations live in `tui/src/interaction/`, not Plan's domain
+- [`pi-kit/`](pi-kit) (`@pi-extensions/pi-kit`) centralizes generic host-TUI presentation and local
+  menu/questionnaire interactions. Read [the pi-kit guide](docs/pi-kit.md) before editing it.
+- [`pi-kit/src/interaction.ts`](pi-kit/src/interaction.ts) exposes the typed TUI/RPC interaction
+  boundary; generic TypeScript implementations live in `pi-kit/src/interaction/`, not Plan's domain
   workflow.
 - [`pi-openai-subagents/index.ts`](pi-openai-subagents/index.ts) wires policy/configuration, child
   execution, reports/evidence, and fleet UI. Domain runtime/state/presentation stay local.
@@ -25,7 +25,7 @@ This supplements the agent-directory guidance; it records repository-specific ed
 - [`pi-openai-multi/index.ts`](pi-openai-multi/index.ts) owns explicit account selection and
   provider registration; vault, credentials, bridge, migration, and OAuth remain package-local.
 - Prefer native Pi APIs where sufficient. Do not move editor, fleet, OAuth, domain state, or
-  extension registration into the generic TUI package.
+  extension registration into pi-kit.
 
 ## Setup and verification commands
 
@@ -90,7 +90,7 @@ or Pi's managed installation to repair this checkout.
 
 ## Selecting checks and finding detail
 
-- Shared TUI edits need shared tests plus affected consumers; source-only dependency closure and
+- pi-kit edits need shared tests plus affected consumers; source-only dependency closure and
   runtime-only loading need separate verification when imports/manifests change.
 - HEM: [reference](pi-hem/docs/reference.md), especially binding inventories, packaging, and
   real-terminal Escape/viewport/clipboard checks. Retain regex WASM notices and packed metadata.

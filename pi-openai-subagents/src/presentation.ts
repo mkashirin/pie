@@ -5,7 +5,7 @@ import {
     escapeMarkdownText,
     Markdown,
     wrapProse,
-} from "@pi-extensions/tui";
+} from "@pi-extensions/pi-kit";
 import { compactText } from "./activity.ts";
 import type { LiveRunResult } from "./state.ts";
 

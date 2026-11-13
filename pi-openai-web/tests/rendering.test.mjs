@@ -5,7 +5,7 @@ import { attachPage, basePacket } from "../src/results.ts";
 
 const jiti = createJiti(import.meta.url);
 const { getOsc8LinkAtColumn, stripTerminalSequences, visibleWidth, wrapPreservingText } = await jiti
-    .import("@pi-extensions/tui");
+    .import("@pi-extensions/pi-kit");
 const { renderCall, renderPacket, renderStatus } = await jiti.import("../src/presentation.ts");
 
 const hostEntry = import.meta.resolve("@earendil-works/pi-coding-agent");

@@ -14,7 +14,7 @@ import { Value } from "typebox/value";
 import { PacketSchema } from "../src/schemas.ts";
 
 const jiti = createJiti(import.meta.url);
-const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { visibleWidth } = await jiti.import("@pi-extensions/pi-kit");
 const { default: factory } = await jiti.import("../index.ts");
 const { Runtime } = await jiti.import("../src/runtime.ts");
 

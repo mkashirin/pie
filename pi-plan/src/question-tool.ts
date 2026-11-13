@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { runQuestionnaire } from "@pi-extensions/tui";
+import { runQuestionnaire } from "@pi-extensions/pi-kit";
 
 export const PLAN_MODE_QUESTION_TOOL_NAME = "plan_mode_question";
 export const MAX_PLAN_MODE_RESPONSE_LENGTH = 4000;

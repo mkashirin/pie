@@ -81,8 +81,8 @@ WASM runtime, and LSP's JSON-RPC/protocol/process-launch libraries. Shared TUI i
 only Pi host APIs, not another Pi extension. Exact versions live in the
 [root lockfile](../package-lock.json) and package manifests rather than a second dependency
 inventory here. Copying only TypeScript sources is not a runtime installation. The source-only
-[`@pi-extensions/tui`](tui.md) workspace is private support code, not another Pi extension or a
-separately installed package.
+[`@pi-extensions/pi-kit`](pi-kit.md) workspace is private support code, not another Pi extension or
+a separately installed package.
 
 ## Updates and rollback
 

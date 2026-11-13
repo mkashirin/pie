@@ -134,5 +134,6 @@ settings/definitions, review freshness, evidence/projection bounds, execution pa
 rendering, troubleshooting and offline/manual verification. Start there when changing agent
 behavior.
 
-Shared UI infrastructure is documented in [the TUI guide](../docs/tui.md); fleet state, activity,
-agent cards and execution remain local. See also [workspace development](../docs/development.md).
+Shared UI infrastructure is documented in [the pi-kit guide](../docs/pi-kit.md); fleet state,
+activity, agent cards and execution remain local. See also
+[workspace development](../docs/development.md).

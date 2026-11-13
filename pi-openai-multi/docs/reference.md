@@ -74,7 +74,7 @@ credentials. Failed/cancelled reauthentication preserves the existing credential
 abort, dialog abort and native completion must settle once and detach cancellation listeners. The
 [OAuth lifecycle fixtures](../tests/oauth.test.ts) inject native login/dialog fakes; production
 continues to use the native components. Generic interaction infrastructure is described in the
-[shared TUI guide](../../docs/tui.md), not a new OAuth API.
+[pi-kit guide](../../docs/pi-kit.md), not a new OAuth API.
 
 ## Vault and native migration
 
@@ -101,7 +101,7 @@ is unavailable.
 model-registry refresh, status and login cancellation. [bridge.ts](../bridge.ts) owns provider
 registration behavior, authorization leases and stream delegation; credential persistence and
 migration remain in the modules above. Domain actions and native OAuth/credential safety do not
-move into the generic TUI framework.
+move into pi-kit.
 
 - Unselected/unavailable: inspect local `list`/`status`, explicitly `use` a label/UUID and select
   an `openai-multi` model. Inspect launch flags if valid saved selection seems ignored. Do not rely

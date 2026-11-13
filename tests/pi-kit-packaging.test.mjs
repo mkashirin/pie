@@ -7,19 +7,20 @@ import test from "node:test";
 const root = new URL("../", import.meta.url);
 const readJson = (path) => JSON.parse(readFileSync(new URL(path, root), "utf8"));
 const manifest = readJson("package.json");
-const shared = readJson("tui/package.json");
+const shared = readJson("pi-kit/package.json");
 const lock = readJson("package-lock.json");
 
-test("seven workspaces retain six Pi entrypoints and a host-only shared TUI", () => {
+test("seven workspaces retain six Pi entrypoints and a host-only pi-kit", () => {
     assert.equal(manifest.name, "pi-extensions");
     assert.equal(lock.name, manifest.name);
     assert.equal(lock.packages[""].name, manifest.name);
     assert.equal(manifest.workspaces.length, 7);
+    assert.ok(manifest.workspaces.includes("pi-kit"));
     assert.equal(manifest.pi.extensions.length, 6);
-    assert.ok(!manifest.pi.extensions.some((path) => path.includes("/tui/")));
-    assert.equal(shared.name, "@pi-extensions/tui");
+    assert.ok(!manifest.pi.extensions.some((path) => path.includes("/pi-kit/")));
+    assert.equal(shared.name, "@pi-extensions/pi-kit");
     assert.equal(shared.version, "0.1.0");
-    assert.equal(lock.packages.tui.name, shared.name);
+    assert.equal(lock.packages["pi-kit"].name, shared.name);
     assert.equal(shared.private, true);
     assert.equal(shared.pi, undefined);
     assert.equal(shared.exports["."], "./src/index.ts");
@@ -33,12 +34,12 @@ test("seven workspaces retain six Pi entrypoints and a host-only shared TUI", ()
             );
         }
     }
-    assert.deepEqual(lock.packages["node_modules/@pi-extensions/tui"], {
-        resolved: "tui",
+    assert.deepEqual(lock.packages["node_modules/@pi-extensions/pi-kit"], {
+        resolved: "pi-kit",
         link: true,
     });
     assert.deepEqual(lock.packages[""].workspaces, manifest.workspaces);
-    for (const workspace of manifest.workspaces.filter((name) => name !== "tui")) {
+    for (const workspace of manifest.workspaces.filter((name) => name !== "pi-kit")) {
         const consumer = readJson(`${workspace}/package.json`);
         assert.equal(consumer.dependencies[shared.name], shared.version, workspace);
         assert.equal(consumer.dependencies["@narumitw/pi-tui-kit"], undefined, workspace);
@@ -65,7 +66,7 @@ function packedFiles(workspace) {
 }
 
 test("source-only shared package and root bundle pack the typed runtime closure", () => {
-    const files = packedFiles("@pi-extensions/tui");
+    const files = packedFiles("@pi-extensions/pi-kit");
     assert.ok(files.includes("src/index.ts"));
     assert.ok(files.includes("src/interaction.ts"));
     for (
@@ -84,7 +85,7 @@ test("source-only shared package and root bundle pack the typed runtime closure"
     assert.ok(files.includes("LICENSE"));
     assert.ok(!files.some((path) => /\.(?:js|d\.ts)$/u.test(path)));
     const bundle = packedFiles();
-    for (const path of files) assert.ok(bundle.includes(`tui/${path}`), path);
+    for (const path of files) assert.ok(bundle.includes(`pi-kit/${path}`), path);
     for (const path of manifest.pi.extensions) assert.ok(bundle.includes(path.slice(2)), path);
     for (const workspace of manifest.workspaces) {
         assert.ok(bundle.includes(`${workspace}/package.json`), workspace);

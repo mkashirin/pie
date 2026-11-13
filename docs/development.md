@@ -5,15 +5,16 @@
 ## Workspace model
 
 This is a source-only npm workspace bundle. The root `pi.extensions` manifest lists **six** Pi
-entrypoints; the private [`tui/`](tui.md) support package makes **seven** npm workspaces. It is not
-another extension. Pi supplies host peers at runtime. Development tooling pins the
+entrypoints; the private [`pi-kit/`](pi-kit.md) support package makes **seven** npm workspaces. It
+is not another extension. Pi supplies host peers at runtime. Development tooling pins the
 `@earendil-works` host APIs to **1.5.0**. Shared interactions have no third-party Pi-extension
 runtime or type dependency. There is no build step.
 
-Keep shared, generic terminal presentation and menu/questionnaire interactions in `tui/`. Extension
-registrations, domain presenters, HEM's editor, Subagents' fleet, Plan's workflow, and Multi's
-OAuth remain local. Prefer native Pi APIs where sufficient. Consult [the TUI guide](tui.md) before
-changing shared behavior; its policies are not interchangeable with every domain renderer.
+Keep shared, generic terminal presentation and menu/questionnaire interactions in `pi-kit/`.
+Extension registrations, domain presenters, HEM's editor, Subagents' fleet, Plan's workflow, and
+Multi's OAuth remain local. Prefer native Pi APIs where sufficient. Consult
+[the pi-kit guide](pi-kit.md) before changing shared behavior; its policies are not interchangeable
+with every domain renderer.
 
 One root lockfile owns the dependency graph. Child packages use root-installed tooling; some have
 package-specific development dependencies declared in their manifests, still installed by root
@@ -47,7 +48,7 @@ child setup command. Re-run root setup after dependency/lockfile changes.
 | `npm run smoke:lsp`          | LSP runtime-loader smoke entry, separate from its normal test suite.              |
 
 A focused package check is `npm run check --workspace pi-plan` (substitute another workspace name),
-or `npm run check` from that package after root setup. Shared UI changes need the TUI gate and
+or `npm run check` from that package after root setup. Shared UI changes need the pi-kit gate and
 affected consumers, not just a single extension check. Root `npm run check` is the complete local
 gate, not a certificate of real-terminal compatibility.
 
@@ -56,7 +57,7 @@ gate, not a certificate of real-terminal compatibility.
 Most regression suites use `node:test` and local fixtures. Many source-loading tests use jiti;
 Multi also uses tsx. TypeScript uses strict NodeNext, direct source imports, and `noEmit`. Plan and
 shared interactions are fully TypeScript-checked and tested with local host-contract fixtures;
-public TUI consumption does not require `allowJs`.
+public pi-kit consumption does not require `allowJs`.
 
 The installer suite, [`tests/install-scope.test.mjs`](../tests/install-scope.test.mjs), creates
 isolated fixtures and a stub npm executable. It checks local scope, argument handling, explicit
@@ -71,7 +72,7 @@ Package-specific contracts and manual coverage are documented here:
   diagnostics completeness, safe fixes, bounded reports, loader smoke, and provider rollout.
 - [Plan reference](../pi-plan/docs/reference.md#verification): workflow/session state, settings
   atomicity, TUI/RPC routing, questionnaires, chat, and widget behavior.
-- [TUI guide](tui.md): shared framework policies and tests.
+- [pi-kit guide](pi-kit.md): shared framework policies and tests.
 - [Subagents](../pi-openai-subagents/README.md), [Web](../pi-openai-web/README.md), and
   [Multi](../pi-openai-multi/README.md): their domain-specific setup and verification.
 
@@ -90,7 +91,7 @@ integrations verified because fixture tests pass.
 Match native Pi chrome: `→` selection, arrow-key hints, checkmarks, and dot separators. Reuse host
 components and indicators instead of ASCII substitutes or new animation loops. Keep native `...`
 overflow markers, checkbox syntax, and user/model content unchanged. Adapt vendor hints at the
-supported boundary, not in installed dependencies. See [shared TUI policy](tui.md).
+supported boundary, not in installed dependencies. See [pi-kit presentation policy](pi-kit.md).
 
 Do not merge wrapping policies blindly. Transcript evidence, hyperlinks, editor cells, menu labels,
 and diagnostic lines have different whitespace/width requirements. Sanitize presentation without

@@ -1,4 +1,4 @@
-import { visibleWidth } from "@pi-extensions/tui";
+import { visibleWidth } from "@pi-extensions/pi-kit";
 import type { HelixBuffer } from "./model.ts";
 export type Row = {
     cells: { text: string; index: number; width: number }[];

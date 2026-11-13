@@ -81,8 +81,8 @@ visibility alone does not activate Plan Mode.
 
 Read the [workflow and execution reference](docs/reference.md) for ownership/cancellation, settings
 persistence, tool contracts, TUI/RPC behavior, verification, and source update rules. Generic
-terminal interaction is shared through the private [TUI workspace](../docs/tui.md); Plan-specific
-menus, workflow, chat, and widget stay local.
+terminal interaction is shared through the private [pi-kit workspace](../docs/pi-kit.md);
+Plan-specific menus, workflow, chat, and widget stay local.
 
 Use `./install.sh --dev` and `npm run check` from the bundle root. See the
 [development guide](../docs/development.md) for focused checks and manual terminal coverage.

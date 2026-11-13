@@ -1,4 +1,4 @@
-# OpenAI Multi
+# pi-openai-multi
 
 Explicit per-session ChatGPT OAuth account selection for Pi. Models appear under **openai-multi**;
 normal OpenAI models/native credentials remain separate. There is no rotation, quota detection,
@@ -80,7 +80,6 @@ branch's identity. See [selection and commands](docs/reference.md#selection-and-
 request leases and override defenses, vault/migration contracts, OAuth lifecycle, troubleshooting,
 offline checks and the opt-in real-account checklist.
 
-See [workspace development](../docs/development.md) and
-[shared TUI infrastructure](../docs/tui.md). Account actions and OAuth/credential boundaries remain
-local; OAuth continues to use Pi's native dialog and provider rather than a custom login
-implementation.
+See [workspace development](../docs/development.md) and [pi-kit infrastructure](../docs/pi-kit.md).
+Account actions and OAuth/credential boundaries remain local; OAuth continues to use Pi's native
+dialog and provider rather than a custom login implementation.

@@ -9,7 +9,7 @@ import {
     sanitizeDisplayText,
     ThemedMarkdown,
     wrapProse,
-} from "@pi-extensions/tui";
+} from "@pi-extensions/pi-kit";
 import type { PlanModeQuestion, PlanModeQuestionAnswer } from "./question-tool.ts";
 
 interface ChatResult {

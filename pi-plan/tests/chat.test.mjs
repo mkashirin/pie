@@ -6,7 +6,7 @@ import { jiti, visibleWidth } from "./helpers.mjs";
 const { initTheme } = await jiti.import("@earendil-works/pi-coding-agent");
 initTheme("dark");
 const chat = await jiti.import("../src/chat.ts");
-const { Markdown } = await jiti.import("@pi-extensions/tui");
+const { Markdown } = await jiti.import("@pi-extensions/pi-kit");
 const questions = await jiti.import("../src/question-tool.ts");
 const completion = await jiti.import("../src/completion-tool.ts");
 const theme = { fg: (_role, text) => text, bold: (text) => text };

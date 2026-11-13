@@ -1,5 +1,10 @@
 import type { Theme } from "@earendil-works/pi-coding-agent";
-import { type Component, hardWrapText, sanitizeDisplayText, ThemedText } from "@pi-extensions/tui";
+import {
+    type Component,
+    hardWrapText,
+    sanitizeDisplayText,
+    ThemedText,
+} from "@pi-extensions/pi-kit";
 import { Value } from "typebox/value";
 import { capText, type Packet, PacketSchema, packetText } from "./results.ts";
 

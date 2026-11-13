@@ -153,7 +153,7 @@ interactive UI and supports RPC/print.
 ## Terminal rendering
 
 Domain [presentation.ts](../src/presentation.ts) owns call/result/status evidence layout; generic
-UI primitives are described in [the shared TUI guide](../../docs/tui.md). Preserve these policies
+UI primitives are described in [the pi-kit guide](../../docs/pi-kit.md). Preserve these policies
 when modifying presenters:
 
 - Native bold headings and themed locations; Pi's shell owns padding, spacing and

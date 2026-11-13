@@ -28,7 +28,7 @@
         "prepack": "npm run check"
     },
     "dependencies": {
-        "@pi-extensions/tui": "0.1.0",
+        "@pi-extensions/pi-kit": "0.1.0",
         "rregex": "1.13.5"
     },
     "peerDependencies": {

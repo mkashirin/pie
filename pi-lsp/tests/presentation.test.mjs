@@ -4,7 +4,7 @@ import { createJiti } from "jiti";
 import { createPacket } from "../src/results.ts";
 
 const jiti = createJiti(import.meta.url);
-const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { visibleWidth } = await jiti.import("@pi-extensions/pi-kit");
 const { renderResult, renderStatus, renderToolCall } = await jiti.import("../src/presentation.ts");
 const theme = { fg: (_color, text) => text };
 test("diagnostic severity colors are independent of successful packet status", () => {

@@ -5,7 +5,7 @@ import {
     ThemedLines,
     ThemedText,
     wrapPreservingText,
-} from "@pi-extensions/tui";
+} from "@pi-extensions/pi-kit";
 import { Value } from "typebox/value";
 import { type Packet, PacketSchema } from "./schemas.ts";
 

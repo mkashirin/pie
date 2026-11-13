@@ -22,7 +22,7 @@
         "smoke": "node tests/smoke-run.mjs"
     },
     "dependencies": {
-        "@pi-extensions/tui": "0.1.0",
+        "@pi-extensions/pi-kit": "0.1.0",
         "cross-spawn": "7.0.6",
         "vscode-jsonrpc": "8.2.0",
         "vscode-languageserver-protocol": "3.17.5"

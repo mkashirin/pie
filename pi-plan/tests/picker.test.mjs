@@ -4,12 +4,12 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
-const { runMenu, defineMenu } = await jiti.import("@pi-extensions/tui");
+const { runMenu, defineMenu } = await jiti.import("@pi-extensions/pi-kit");
 const { createTuiHarness, createRpcHarness } = await import("../../tests/interaction-harness.mjs");
 const { createMenuScreenComponent } = await jiti.import(
-    "../../tui/src/interaction/menu-components.ts",
+    "../../pi-kit/src/interaction/menu-components.ts",
 );
-const { wrapWords } = await jiti.import("../../tui/src/interaction/layout.ts");
+const { wrapWords } = await jiti.import("../../pi-kit/src/interaction/layout.ts");
 const callers = await jiti.import("../src/interactive-ui.ts");
 const identityTheme = { fg: (_color, text) => text, bold: (text) => text };
 const keybindings = { matches: () => false, getKeys: () => [] };
@@ -793,7 +793,7 @@ test("real Plan Mode caller retains RPC labels and unsupported-mode routing", as
 test(
     "shared runtime and declaration closure has no vendor dependency or generated chunks",
     () => {
-        const root = new URL("../../tui/", import.meta.url);
+        const root = new URL("../../pi-kit/", import.meta.url);
         assert.equal(existsSync(new URL("vendor/", root)), false);
         assert.equal(existsSync(new URL("src/chunks/", root)), false);
         const files = [];

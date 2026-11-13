@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { stripVTControlCharacters as plain } from "node:util";
 import { jiti, visibleWidth } from "./helpers.mjs";
 
-const { runQuestionnaire } = await jiti.import("@pi-extensions/tui");
+const { runQuestionnaire } = await jiti.import("@pi-extensions/pi-kit");
 const { createTuiHarness, createRpcHarness } = await import("../../tests/interaction-harness.mjs");
 const { answerPlanModeQuestions } = await jiti.import("../src/question-tool.ts");
 const label = "Keep ordinary words together while choosing";

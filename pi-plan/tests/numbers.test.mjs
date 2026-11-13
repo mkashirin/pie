@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { KeybindingsManager, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { jiti } from "./helpers.mjs";
 
-const { runQuestionnaire } = await jiti.import("@pi-extensions/tui");
+const { runQuestionnaire } = await jiti.import("@pi-extensions/pi-kit");
 const { createTuiHarness } = await import("../../tests/interaction-harness.mjs");
 const question = {
     id: "original:id",

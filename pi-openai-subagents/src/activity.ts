@@ -1,4 +1,4 @@
-import { inlineText as compactText, sanitizeDisplayText } from "@pi-extensions/tui";
+import { inlineText as compactText, sanitizeDisplayText } from "@pi-extensions/pi-kit";
 import type { Profile } from "./config.ts";
 
 export type ActivityStage = "pending" | "running" | "succeeded" | "failed" | "blocked";

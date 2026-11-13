@@ -18,8 +18,8 @@ there is no build step.
 The bundle also includes [onboard](skills/onboard/SKILL.md),
 [researcher](skills/researcher/SKILL.md), and the Russian-text skills
 [ru-check](skills/ru-check/SKILL.md), [ru-score](skills/ru-score/SKILL.md), and
-[ru-text](skills/ru-text/SKILL.md). The private shared [TUI workspace](docs/tui.md) is supporting
-code, not a seventh extension.
+[ru-text](skills/ru-text/SKILL.md). The private shared [pi-kit workspace](docs/pi-kit.md) is
+supporting code, not a seventh extension.
 
 ## Install
 
@@ -91,7 +91,7 @@ language-only editing is not a fact-check.
 From the bundle root, use `./install.sh --dev` for shared tooling, then `npm run check` for root
 and workspace checks. There are **seven workspaces and six Pi entrypoints**, one root lockfile, and
 no child installation step. See [development and verification](docs/development.md),
-[shared TUI architecture](docs/tui.md), and the [agent operating guide](AGENTS.md).
+[pi-kit architecture](docs/pi-kit.md), and the [agent operating guide](AGENTS.md).
 
 ## License
 

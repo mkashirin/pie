@@ -1,5 +1,5 @@
 import type { ExtensionContext, ToolInfo } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu, type RunMenuResult } from "@pi-extensions/tui";
+import { defineMenu, runMenu, type RunMenuResult } from "@pi-extensions/pi-kit";
 import { snapshotAvailableImplementationModels } from "./implementation-models.ts";
 import { implementationRetentionPreview } from "./implementation-retention.ts";
 import {

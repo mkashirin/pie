@@ -1,5 +1,5 @@
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { sanitizeDisplayText, wrapProse } from "@pi-extensions/tui";
+import { sanitizeDisplayText, wrapProse } from "@pi-extensions/pi-kit";
 import type { PlanModeState } from "./state.ts";
 
 export function sanitizePlanModeWidgetLine(value: string): string {

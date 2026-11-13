@@ -52,7 +52,7 @@ test("packed sources load with offline Node WASM and copied runtime dependencies
         execFileSync("tar", ["-xzf", path.join(temp, packed.filename), "-C", temp]);
         const manifest = JSON.parse(readFileSync(path.join(temp, "package/package.json"), "utf8"));
         assert.deepEqual(manifest.dependencies, {
-            "@pi-extensions/tui": "0.1.0",
+            "@pi-extensions/pi-kit": "0.1.0",
             rregex: "1.13.5",
         });
         assert.deepEqual(manifest.pi.extensions, ["./index.ts"]);

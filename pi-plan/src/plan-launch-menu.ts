@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu } from "@pi-extensions/tui";
+import { defineMenu, runMenu } from "@pi-extensions/pi-kit";
 
 export interface PlanLaunchTool {
     name: string;

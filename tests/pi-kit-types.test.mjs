@@ -7,9 +7,9 @@ import test from "node:test";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 
-test("strict consumers use the local typed TUI API without allowJs", (t) => {
+test("strict consumers use the local typed pi-kit API without allowJs", (t) => {
     // Stay in the workspace's resolution tree without changing any consumer configuration.
-    const directory = mkdtempSync(join(root, "tui/tests/.types-"));
+    const directory = mkdtempSync(join(root, "pi-kit/tests/.types-"));
     t.after(() => rmSync(directory, { recursive: true, force: true }));
     writeFileSync(join(directory, "package.json"), JSON.stringify({ type: "module" }));
     writeFileSync(
@@ -40,7 +40,7 @@ import {
     type Component, defineMenu, runMenu, runQuestionnaire,
     type MenuDefinition, type RunMenuResult, type RunQuestionnaireResult,
     sanitizeDisplayText, ThemedText, wrapPreservingText,
-} from "@pi-extensions/tui";
+} from "@pi-extensions/pi-kit";
 
 declare const ctx: ExtensionContext;
 interface State { count: number; }

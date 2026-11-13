@@ -6,7 +6,7 @@ import { attachPage, attachSearch, basePacket, toolResult } from "../src/results
 import { PacketSchema } from "../src/schemas.ts";
 
 const jiti = createJiti(import.meta.url);
-const { visibleWidth } = await jiti.import("@pi-extensions/tui");
+const { visibleWidth } = await jiti.import("@pi-extensions/pi-kit");
 const { renderPacket } = await jiti.import("../src/presentation.ts");
 
 const theme = { fg: (_color, text) => text };

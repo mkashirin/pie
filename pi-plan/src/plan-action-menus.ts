@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { defineMenu, runMenu } from "@pi-extensions/tui";
+import { defineMenu, runMenu } from "@pi-extensions/pi-kit";
 import { snapshotAvailableImplementationModels } from "./implementation-models.ts";
 import { type PlanExportDestinationProvider, planExportInputScreen } from "./plan-export-screen.ts";
 import { IMPLEMENTATION_THINKING_LEVELS, type PlanModeFixedThinkingLevel } from "./settings.ts";
